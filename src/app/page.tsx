@@ -1,36 +1,51 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+interface StoryMeta {
+  storyId: string;
+  title: string;
+  createdAt: string;
+}
 
 export default function HomePage() {
-  const [narration, setNarration] = useState<string>(
-    "故事将从这里开始。在下方输入主角的行动或台词，然后点击发送。"
-  );
-  const [input, setInput] = useState<string>("");
+  const router = useRouter();
+  const [stories, setStories] = useState<StoryMeta[]>([]);
+  const [title, setTitle] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || loading) return;
+  async function refresh() {
+    try {
+      const res = await fetch("/api/stories");
+      if (!res.ok) throw new Error(`加载失败（HTTP ${res.status}）`);
+      const data = (await res.json()) as { stories: StoryMeta[] };
+      setStories(data.stories);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "未知错误");
+    }
+  }
 
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function handleCreate(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/story-turn", {
+      const res = await fetch("/api/stories", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ input: text }),
+        body: JSON.stringify({ title: title.trim() || undefined }),
       });
-
-      if (!res.ok) {
-        throw new Error(`请求失败（HTTP ${res.status}）`);
-      }
-
-      const data = (await res.json()) as { playerResponse: string };
-      setNarration(data.playerResponse);
-      setInput("");
+      if (!res.ok) throw new Error(`创建失败（HTTP ${res.status}）`);
+      const meta = (await res.json()) as StoryMeta;
+      router.push(`/stories/${meta.storyId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
@@ -41,21 +56,38 @@ export default function HomePage() {
   return (
     <main className="container">
       <h1>小场景故事模拟</h1>
-      <section className="story" aria-label="故事显示区">
-        {narration}
-      </section>
-      <form onSubmit={handleSubmit} className="input-form" aria-label="主角输入">
+
+      <form onSubmit={handleCreate} className="input-form" aria-label="创建故事">
         <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="输入主角的行动或台词…"
-          rows={4}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="故事标题（可选，留空为「未命名故事」）"
+          rows={2}
           disabled={loading}
         />
-        <button type="submit" disabled={loading || !input.trim()}>
-          {loading ? "处理中…" : "发送"}
+        <button type="submit" disabled={loading}>
+          {loading ? "创建中…" : "创建新故事"}
         </button>
       </form>
+
+      <section aria-label="故事列表">
+        <h2 className="section-title">已有故事</h2>
+        {stories.length === 0 ? (
+          <p className="muted">还没有故事。创建一个开始吧。</p>
+        ) : (
+          <ul className="story-list">
+            {stories.map((s) => (
+              <li key={s.storyId}>
+                <Link href={`/stories/${s.storyId}`} className="story-item">
+                  <span className="story-item-title">{s.title}</span>
+                  <span className="story-item-meta">{s.storyId.slice(0, 8)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {error && <p className="error">{error}</p>}
     </main>
   );
