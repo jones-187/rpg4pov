@@ -1,8 +1,13 @@
 services:
   rpg4pov:
     build: .
-    image: rpg4pov:issue1
+    image: rpg4pov:issue2
     container_name: rpg4pov
     ports:
       - "3000:3000"
+    volumes:
+      - rpg4pov-data:/app/data
     restart: unless-stopped
+
+volumes:
+  rpg4pov-data:
