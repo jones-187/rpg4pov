@@ -1,7 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { POST } from "@/app/api/story-turn/route";
+import { createStory, readTurnOutput, resolveWorkspaceRoot } from "@/lib/workspace";
+import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
-function jsonReq(body: unknown): Request {
+let root: string;
+beforeAll(async () => {
+  root = await useTempWorkspaceRoot();
+});
+afterAll(() => resetWorkspaceRoot());
+
+function req(body: unknown): Request {
   return new Request("http://localhost/api/story-turn", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -9,33 +19,68 @@ function jsonReq(body: unknown): Request {
   });
 }
 
-describe("POST /api/story-turn (placeholder)", () => {
-  it("returns 200 with a non-empty playerResponse", async () => {
-    const res = await POST(jsonReq({ input: "我走向酒馆门口" }));
+async function freshStory(): Promise<string> {
+  const meta = await createStory({ title: "turn 测试" });
+  return meta.storyId;
+}
+
+describe("POST /api/story-turn (Issue 2: storyId-bound, reads only turn/output.md)", () => {
+  it("returns 200 and echoes input via turn/output.md", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "推开木门" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(typeof json.playerResponse).toBe("string");
-    expect(json.playerResponse.length).toBeGreaterThan(0);
-  });
-
-  it("echoes the input inside the placeholder narration", async () => {
-    const res = await POST(jsonReq({ input: "推开木门" }));
-    const json = await res.json();
     expect(json.playerResponse).toContain("推开木门");
+    // 返回内容必须等于 turn/output.md 的落盘内容（Web 唯一来源）
+    expect(json.playerResponse).toBe(await readTurnOutput(storyId));
   });
 
-  it("returns 400 when input is missing or empty", async () => {
-    const res = await POST(jsonReq({ input: "   " }));
+  it("writes player input to turn/input.md", async () => {
+    const storyId = await freshStory();
+    await POST(req({ storyId, input: "我走向酒馆门口" }));
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceRoot(), storyId, "turn", "input.md"),
+      "utf8",
+    );
+    expect(raw).toContain("我走向酒馆门口");
+  });
+
+  it("returns 400 when input is missing/blank", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "   " }));
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when storyId is invalid", async () => {
+    const res = await POST(req({ storyId: "not-a-uuid", input: "x" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when workspace does not exist", async () => {
+    const res = await POST(req({ storyId: "00000000-0000-4000-8000-000000000000", input: "x" }));
+    expect(res.status).toBe(404);
+  });
+
   it("returns 400 when body is not valid JSON", async () => {
-    const req = new Request("http://localhost/api/story-turn", {
+    const bad = new Request("http://localhost/api/story-turn", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "not-json",
     });
-    const res = await POST(req);
+    const res = await POST(bad);
     expect(res.status).toBe(400);
+  });
+
+  it("reads ONLY turn/output.md — junk in logs/ never leaks", async () => {
+    const storyId = await freshStory();
+    // 在 logs/ 写入「机密」，断言它不会出现在响应里
+    await fs.writeFile(
+      path.join(resolveWorkspaceRoot(), storyId, "logs", "secret.md"),
+      "机密：主角不应看到的内容",
+    );
+    const res = await POST(req({ storyId, input: "试探" }));
+    const json = await res.json();
+    expect(json.playerResponse).not.toContain("机密");
+    expect(json.playerResponse).toBe(await readTurnOutput(storyId));
   });
 });
