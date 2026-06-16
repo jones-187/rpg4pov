@@ -1,0 +1,85 @@
+:root {
+  --bg: #0f1115;
+  --panel: #1a1d24;
+  --text: #e6e6e6;
+  --accent: #7c9eff;
+  --muted: #8a8f98;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.container h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--accent);
+}
+
+.story {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 20px;
+  min-height: 240px;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.input-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.input-form textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #2c313a;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.input-form button {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #0f1115;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.input-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: #ff6b6b;
+  font-size: 14px;
+}
