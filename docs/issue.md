@@ -7,6 +7,13 @@
 **Type**: AFK
 **Blocked by**: None - can start immediately
 **User stories covered**: 技术架构 PRD US 1-5, 11-19, 61-64
+**Status**: 实现 + 评审通过,待 Docker 环境验证
+- ✅ 代码实现完成(5 个提交对应 plan 的 5 个 Task)
+- ✅ 代码评审通过:静态审查无缺陷,边界守得住(无 storyId/workspace/agent/随机/锁/回滚,均留给后续 issue)
+- ✅ Vitest API 契约测试 4/4 全绿(200/echo/空输入 400/坏 JSON 400)
+- ⏭️ 待验证:Docker 构建 + 容器内冒烟(`curl /` 返回 200、占位 `POST /api/story-turn` 返回 `playerResponse`、镜像内不含 `src`/`tests`/`docs`/`.git`)——本机无 Docker,需在有 Docker 的环境补跑
+- ⏭️ 待验证:浏览器人工冒烟(故事显示区 + 输入框 + 发送按钮 + loading 态)
+- ⚠️ 已知:本机 `pnpm build` 因 Windows 符号链接权限(`output:"standalone"` 的 trace 阶段)失败;按约定仅以 Docker 内表现为准,不作为阻塞项
 
 **目标行为**：用户能通过浏览器打开本地 Web 页面，看到故事显示区、输入框和发送按钮。提交输入后，后端返回一个占位故事响应。应用可以通过 Docker 单容器启动，并暴露 Web 端口。
 
