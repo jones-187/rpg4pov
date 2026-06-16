@@ -11,6 +11,11 @@ export interface StoryMeta {
   createdAt: string;
 }
 
+export interface DoneMarker {
+  status: string;
+  completedAt: string;
+}
+
 export function resolveWorkspaceRoot(): string {
   const root = process.env.WORKSPACE_ROOT;
   if (root && root.trim()) return path.resolve(root);
@@ -21,14 +26,15 @@ export function isValidStoryId(id: string): boolean {
   return STORY_ID_RE.test(id);
 }
 
-function workspaceDir(storyId: string): string {
+export function resolveWorkspaceDir(storyId: string): string {
+  if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
   return path.resolve(resolveWorkspaceRoot(), storyId);
 }
 
 export async function workspaceExists(storyId: string): Promise<boolean> {
   if (!isValidStoryId(storyId)) return false;
   try {
-    await fs.access(path.join(workspaceDir(storyId), "story.md"));
+    await fs.access(path.join(resolveWorkspaceDir(storyId), "story.md"));
     return true;
   } catch {
     return false;
@@ -39,7 +45,7 @@ export async function createStory(opts?: { title?: string }): Promise<StoryMeta>
   const storyId = crypto.randomUUID();
   const title = normalizeTitle(opts?.title);
   const createdAt = new Date().toISOString();
-  const dir = workspaceDir(storyId);
+  const dir = resolveWorkspaceDir(storyId);
 
   await fs.mkdir(path.join(dir, "actors"), { recursive: true });
   await fs.mkdir(path.join(dir, "logs"), { recursive: true });
@@ -82,7 +88,7 @@ export async function getStory(storyId: string): Promise<StoryMeta | null> {
 
 async function readStoryMeta(storyId: string): Promise<StoryMeta | null> {
   try {
-    const raw = await fs.readFile(path.join(workspaceDir(storyId), "story.md"), "utf8");
+    const raw = await fs.readFile(path.join(resolveWorkspaceDir(storyId), "story.md"), "utf8");
     return parseStoryMd(raw);
   } catch {
     return null;
@@ -92,7 +98,7 @@ async function readStoryMeta(storyId: string): Promise<StoryMeta | null> {
 export async function readTurnOutput(storyId: string): Promise<string | null> {
   if (!isValidStoryId(storyId)) return null;
   try {
-    return await fs.readFile(path.join(workspaceDir(storyId), "turn", "output.md"), "utf8");
+    return await fs.readFile(path.join(resolveWorkspaceDir(storyId), "turn", "output.md"), "utf8");
   } catch {
     return null;
   }
@@ -101,14 +107,45 @@ export async function readTurnOutput(storyId: string): Promise<string | null> {
 export async function writeTurnInput(storyId: string, input: string): Promise<void> {
   if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
   await fs.writeFile(
-    path.join(workspaceDir(storyId), "turn", "input.md"),
+    path.join(resolveWorkspaceDir(storyId), "turn", "input.md"),
     `# 本回合输入\n\n${input}\n`,
   );
 }
 
+export async function readTurnDone(storyId: string): Promise<DoneMarker | null> {
+  if (!isValidStoryId(storyId)) return null;
+  try {
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(storyId), "turn", "done.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      typeof (parsed as DoneMarker).status !== "string" ||
+      typeof (parsed as DoneMarker).completedAt !== "string"
+    ) {
+      return null;
+    }
+    return parsed as DoneMarker;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearTurnDone(storyId: string): Promise<void> {
+  if (!isValidStoryId(storyId)) return;
+  try {
+    await fs.unlink(path.join(resolveWorkspaceDir(storyId), "turn", "done.json"));
+  } catch {
+    // 文件不存在，无需操作
+  }
+}
+
 export async function writeTurnOutput(storyId: string, content: string): Promise<void> {
   if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
-  await fs.writeFile(path.join(workspaceDir(storyId), "turn", "output.md"), content);
+  await fs.writeFile(path.join(resolveWorkspaceDir(storyId), "turn", "output.md"), content);
 }
 
 function normalizeTitle(raw?: string): string {

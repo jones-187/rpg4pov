@@ -8,8 +8,10 @@ import {
   workspaceExists,
   isValidStoryId,
   readTurnOutput,
+  readTurnDone,
+  clearTurnDone,
   writeTurnInput,
-  writeTurnOutput,
+  resolveWorkspaceDir,
   resolveWorkspaceRoot,
 } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
@@ -110,11 +112,15 @@ describe("getStory / workspaceExists", () => {
   });
 });
 
-describe("turn input/output files", () => {
-  it("writes input and output, reads output back", async () => {
+describe("turn input/output/done files", () => {
+  it("writes input and reads output back", async () => {
     const meta = await createStory();
     await writeTurnInput(meta.storyId, "推开木门");
-    await writeTurnOutput(meta.storyId, "主角视窗内容");
+    // 模拟 runner 直接写 output.md（Issue 3 起 runner 用 fs 写）
+    await fs.writeFile(
+      path.join(root, meta.storyId, "turn", "output.md"),
+      "主角视窗内容",
+    );
     const out = await readTurnOutput(meta.storyId);
     expect(out).toBe("主角视窗内容");
     const inputRaw = await fs.readFile(
@@ -125,6 +131,63 @@ describe("turn input/output files", () => {
   });
   it("readTurnOutput returns null for unknown story", async () => {
     expect(await readTurnOutput("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+
+  it("readTurnDone returns null when done.json does not exist", async () => {
+    const meta = await createStory();
+    expect(await readTurnDone(meta.storyId)).toBeNull();
+  });
+  it("readTurnDone returns parsed marker when done.json exists", async () => {
+    const meta = await createStory();
+    await fs.writeFile(
+      path.join(root, meta.storyId, "turn", "done.json"),
+      JSON.stringify({ status: "success", completedAt: "2026-06-16T12:00:00.000Z" }),
+    );
+    const done = await readTurnDone(meta.storyId);
+    expect(done).toEqual({ status: "success", completedAt: "2026-06-16T12:00:00.000Z" });
+  });
+  it("readTurnDone returns null for invalid JSON", async () => {
+    const meta = await createStory();
+    await fs.writeFile(
+      path.join(root, meta.storyId, "turn", "done.json"),
+      "not-json",
+    );
+    expect(await readTurnDone(meta.storyId)).toBeNull();
+  });
+  it("readTurnDone returns null when fields are missing", async () => {
+    const meta = await createStory();
+    await fs.writeFile(
+      path.join(root, meta.storyId, "turn", "done.json"),
+      JSON.stringify({ status: "success" }),
+    );
+    expect(await readTurnDone(meta.storyId)).toBeNull();
+  });
+  it("readTurnDone returns null for unknown story", async () => {
+    expect(await readTurnDone("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+
+  it("clearTurnDone removes done.json if exists", async () => {
+    const meta = await createStory();
+    const donePath = path.join(root, meta.storyId, "turn", "done.json");
+    await fs.writeFile(donePath, JSON.stringify({ status: "success", completedAt: "2026-06-16T12:00:00.000Z" }));
+    await clearTurnDone(meta.storyId);
+    await expect(fs.access(donePath)).rejects.toThrow();
+  });
+  it("clearTurnDone is no-op when done.json does not exist", async () => {
+    const meta = await createStory();
+    await expect(clearTurnDone(meta.storyId)).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveWorkspaceDir", () => {
+  it("returns absolute path for valid storyId", async () => {
+    const meta = await createStory();
+    expect(resolveWorkspaceDir(meta.storyId)).toBe(path.resolve(root, meta.storyId));
+  });
+  it("throws for invalid storyId", () => {
+    expect(() => resolveWorkspaceDir("..")).toThrow("invalid storyId");
+    expect(() => resolveWorkspaceDir("not-a-uuid")).toThrow("invalid storyId");
+    expect(() => resolveWorkspaceDir("")).toThrow("invalid storyId");
   });
 });
 
