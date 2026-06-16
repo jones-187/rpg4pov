@@ -1,0 +1,8 @@
+services:
+  rpg4pov:
+    build: .
+    image: rpg4pov:issue1
+    container_name: rpg4pov
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
