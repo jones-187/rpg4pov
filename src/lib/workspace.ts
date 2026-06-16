@@ -136,11 +136,6 @@ export async function clearTurnDone(storyId: string): Promise<void> {
   }
 }
 
-export async function writeTurnOutput(storyId: string, content: string): Promise<void> {
-  if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
-  await fs.writeFile(path.join(resolveWorkspaceDir(storyId), "turn", "output.md"), content);
-}
-
 function isDoneMarker(value: unknown): value is DoneMarker {
   if (value === null || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
