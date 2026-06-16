@@ -59,8 +59,16 @@ describe("FakeAgentRunner", () => {
 
   it("does not touch logs/ or world.md or player.md", async () => {
     const meta = await createStory();
-    const before = await fs.readFile(
+    const worldBefore = await fs.readFile(
       path.join(root, meta.storyId, "world.md"),
+      "utf8",
+    );
+    const playerBefore = await fs.readFile(
+      path.join(root, meta.storyId, "player.md"),
+      "utf8",
+    );
+    const logsBefore = await fs.readFile(
+      path.join(root, meta.storyId, "logs", ".gitkeep"),
       "utf8",
     );
     const runner = new FakeAgentRunner();
@@ -69,10 +77,8 @@ describe("FakeAgentRunner", () => {
       workspaceDir: resolveWorkspaceDir(meta.storyId),
       playerInput: "不动",
     });
-    const after = await fs.readFile(
-      path.join(root, meta.storyId, "world.md"),
-      "utf8",
-    );
-    expect(after).toBe(before);
+    expect(await fs.readFile(path.join(root, meta.storyId, "world.md"), "utf8")).toBe(worldBefore);
+    expect(await fs.readFile(path.join(root, meta.storyId, "player.md"), "utf8")).toBe(playerBefore);
+    expect(await fs.readFile(path.join(root, meta.storyId, "logs", ".gitkeep"), "utf8")).toBe(logsBefore);
   });
 });
