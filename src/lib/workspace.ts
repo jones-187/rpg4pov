@@ -120,15 +120,8 @@ export async function readTurnDone(storyId: string): Promise<DoneMarker | null> 
       "utf8",
     );
     const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed === null ||
-      typeof parsed !== "object" ||
-      typeof (parsed as DoneMarker).status !== "string" ||
-      typeof (parsed as DoneMarker).completedAt !== "string"
-    ) {
-      return null;
-    }
-    return parsed as DoneMarker;
+    if (!isDoneMarker(parsed)) return null;
+    return parsed;
   } catch {
     return null;
   }
@@ -139,13 +132,19 @@ export async function clearTurnDone(storyId: string): Promise<void> {
   try {
     await fs.unlink(path.join(resolveWorkspaceDir(storyId), "turn", "done.json"));
   } catch {
-    // 文件不存在，无需操作
+    // 忽略清理失败（文件不存在或权限问题）
   }
 }
 
 export async function writeTurnOutput(storyId: string, content: string): Promise<void> {
   if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
   await fs.writeFile(path.join(resolveWorkspaceDir(storyId), "turn", "output.md"), content);
+}
+
+function isDoneMarker(value: unknown): value is DoneMarker {
+  if (value === null || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.status === "string" && typeof v.completedAt === "string";
 }
 
 function normalizeTitle(raw?: string): string {
