@@ -9,6 +9,9 @@ next-env.d.ts
 # env
 .env*.local
 
+# story workspace data (dev)
+data
+
 # misc
 *.log
 .DS_Store
