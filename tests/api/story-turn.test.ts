@@ -83,6 +83,36 @@ describe("POST /api/story-turn (Issue 2: storyId-bound, reads only turn/output.m
     expect(json.playerResponse).not.toContain("机密");
     expect(json.playerResponse).toBe(await readTurnOutput(storyId));
   });
+
+  it("does not leak logs/random-rolls.jsonl through playerResponse", async () => {
+    const storyId = await freshStory();
+    const randomLogPath = path.join(
+      resolveWorkspaceRoot(),
+      storyId,
+      "logs",
+      "random-rolls.jsonl",
+    );
+    await fs.writeFile(
+      randomLogPath,
+      JSON.stringify({
+        at: "2026-06-17T00:00:00.000Z",
+        storyId,
+        rollId: "secret-random-roll",
+        type: "roll-choice",
+        candidates: [{ id: "secret", label: "机密随机结果", weight: 1 }],
+        selectedId: "secret",
+        randomSource: "injected",
+        sample: 0.42,
+      }) + "\n",
+    );
+
+    const res = await POST(req({ storyId, input: "继续前进" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.playerResponse).not.toContain("secret-random-roll");
+    expect(json.playerResponse).not.toContain("机密随机结果");
+    expect(json.playerResponse).toBe(await readTurnOutput(storyId));
+  });
 });
 
 describe("POST /api/story-turn (Issue 4 regression)", () => {
