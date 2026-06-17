@@ -80,6 +80,12 @@ Web 输入
 **Type**: AFK
 **Blocked by**: Issue 3
 **User stories covered**: 技术架构 PRD US 55-60
+**Status**: 实现 + 测试完成
+- ✅ `rollChoice` 工具模块完成：候选项 + 权重、调用方提供 rollId、可注入 rng、生产 crypto 随机
+- ✅ 成功随机判定追加写入 `logs/random-rolls.jsonl`（JSONL），Web/API 不返回 random log
+- ✅ 集成测试证明随机结果可绑定到 `turn/output.md`
+- ✅ 随机工具失败与 random log 写入失败触发 Orchestrator rollback
+- ⏭️ 不做 CLI wrapper；Issue 6 接真实 Claude Code Runner 时再基于本模块增加 shell 调用方式
 
 **目标行为**：系统提供一个随机工具，支持“候选项 + 权重/概率”的判定。Fake Agent 或测试回合可以调用该工具，随机结果写入 random log，并被用于生成本回合主角可见响应。
 

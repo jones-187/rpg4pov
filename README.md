@@ -2,9 +2,9 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。
 
-当前仓库状态：**Issue 2 — storyId + 独立 Markdown Story Workspace**。
-首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，返回占位回合。
-尚未接入初始化 agent、真实 agent runtime 与随机工具（属后续 issue）。
+当前仓库状态：**Issue 5 — 工具真随机 roll-choice seam**。
+首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 返回固定主角可见输出。
+已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam；尚未接入初始化 agent 与真实 Claude Code agent runtime（属后续 issue）。
 
 ## 本地开发
 
@@ -48,7 +48,8 @@ docker compose up --build
   world.md         # 占位
   player.md        # 占位（主角）
   actors/.gitkeep  # 占位（NPC 角色卡目录）
-  logs/.gitkeep    # 占位（random log 目录）
+  logs/.gitkeep    # 内部日志目录
+  logs/random-rolls.jsonl # 随机判定日志（成功回合追加；不对用户可见）
   turn/input.md    # 本回合主角输入
   turn/output.md   # 本回合固定主角可见输出（Web 唯一返回源）
 ```
