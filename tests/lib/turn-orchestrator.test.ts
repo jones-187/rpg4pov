@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { TurnOrchestrator } from "@/lib/turn-orchestrator";
+import { TurnOrchestrator, TurnBusyError } from "@/lib/turn-orchestrator";
 import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
-import { createStory, readTurnDone, readTurnOutput } from "@/lib/workspace";
+import { createStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -39,6 +39,19 @@ class EmptyOutputRunner implements AgentRunner {
       JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
     );
     return { success: true };
+  }
+}
+
+/** 超时模拟 runner：永不返回，直到 signal abort。 */
+class HangingRunner implements AgentRunner {
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    return await new Promise<TurnResult>((_, reject) => {
+      req.signal.addEventListener("abort", () => {
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
   }
 }
 
@@ -92,20 +105,6 @@ describe("TurnOrchestrator", () => {
     expect(outcome.error).toBe("output missing or empty");
   });
 
-  it("clears old done.json before calling runner", async () => {
-    const meta = await createStory();
-    // 手动写入旧 done.json
-    const donePath = path.join(root, meta.storyId, "turn", "done.json");
-    await fs.writeFile(
-      donePath,
-      JSON.stringify({ status: "success", completedAt: "2000-01-01T00:00:00.000Z" }),
-    );
-    // 用 NoopRunner（不写 done.json），验证旧 done.json 被清理
-    const orchestrator = new TurnOrchestrator(new NoopRunner());
-    await orchestrator.executeTurn(meta.storyId, "测试");
-    await expect(fs.access(donePath)).rejects.toThrow();
-  });
-
   it("writes player input to turn/input.md before calling runner", async () => {
     const meta = await createStory();
     const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
@@ -115,5 +114,113 @@ describe("TurnOrchestrator", () => {
       "utf8",
     );
     expect(inputRaw).toContain("走向酒馆");
+  });
+
+  // --- Issue 4 新增测试 ---
+
+  it("failed turn restores workspace to pre-turn state (Issue 4 rollback)", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+    // 手动写入上一回合的 done.json（快照应捕获它）
+    const donePath = path.join(wsDir, "turn", "done.json");
+    const prevDone = JSON.stringify({
+      status: "success",
+      completedAt: "2000-01-01T00:00:00.000Z",
+    });
+    await fs.writeFile(donePath, prevDone);
+
+    // runner 在执行期间写半成品文件，但不写 done.json → 失败
+    class HalfBakedRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const dir = req.workspaceDir;
+        await fs.writeFile(path.join(dir, "actors", "half-baked-npc.md"), "半成品");
+        return { success: false, error: "half-baked" };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new HalfBakedRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "测试");
+    expect(outcome.success).toBe(false);
+    // 关键：回滚后 done.json 恢复为快照态（上回合的成功标记），不是被清理
+    const restoredDone = await fs.readFile(donePath, "utf8");
+    expect(restoredDone).toBe(prevDone);
+    // runner 新增的半成品文件被清除
+    await expect(fs.access(path.join(wsDir, "actors", "half-baked-npc.md"))).rejects.toThrow();
+  });
+
+  it("timeout: hanging runner is aborted, turn fails with timeout reason", async () => {
+    const meta = await createStory();
+    // 用极短超时，避免测试等待 60s
+    const prev = process.env.TURN_TIMEOUT_MS;
+    process.env.TURN_TIMEOUT_MS = "200";
+    try {
+      const orchestrator = new TurnOrchestrator(new HangingRunner());
+      const outcome = await orchestrator.executeTurn(meta.storyId, "等待");
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBe("timeout");
+    } finally {
+      if (prev === undefined) delete process.env.TURN_TIMEOUT_MS;
+      else process.env.TURN_TIMEOUT_MS = prev;
+    }
+  });
+
+  it("rollback removes files the runner wrote before failing", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+    const worldBefore = await fs.readFile(path.join(wsDir, "world.md"), "utf8");
+
+    // runner 写了半成品 world.md + 新文件，但不写 done.json → 失败
+    class HalfBakedRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const dir = req.workspaceDir;
+        await fs.writeFile(path.join(dir, "world.md"), "被污染的世界");
+        await fs.writeFile(path.join(dir, "actors", "ghost.md"), "幽灵 NPC");
+        // 故意不写 done.json → 触发失败
+        return { success: false, error: "half-baked" };
+      }
+    }
+    const orchestrator = new TurnOrchestrator(new HalfBakedRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+
+    // 回滚后 world.md 回到快照态
+    const worldAfter = await fs.readFile(path.join(wsDir, "world.md"), "utf8");
+    expect(worldAfter).toBe(worldBefore);
+    // 幽灵文件被清除
+    await expect(fs.access(path.join(wsDir, "actors", "ghost.md"))).rejects.toThrow();
+  });
+
+  it("second concurrent turn for same storyId throws TurnBusyError", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new HangingRunner());
+    // 用短超时
+    const prev = process.env.TURN_TIMEOUT_MS;
+    process.env.TURN_TIMEOUT_MS = "2000";
+    try {
+      // 第一个回合挂起（HangingRunner 不返回），但不 await
+      const p1 = orchestrator.executeTurn(meta.storyId, "第一回合");
+      // 让事件循环推进，让 p1 真正拿到锁
+      await new Promise((r) => setTimeout(r, 10));
+      // 第二个回合应被锁拒绝
+      await expect(orchestrator.executeTurn(meta.storyId, "并发")).rejects.toThrow(
+        TurnBusyError,
+      );
+      // 等第一个回合超时结束（释放锁）——它返回失败 outcome，不 reject
+      const outcome1 = await p1;
+      expect(outcome1.success).toBe(false);
+      expect(outcome1.error).toBe("timeout");
+    } finally {
+      if (prev === undefined) delete process.env.TURN_TIMEOUT_MS;
+      else process.env.TURN_TIMEOUT_MS = prev;
+    }
+  });
+
+  it("successful turn deletes its snapshot", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    await orchestrator.executeTurn(meta.storyId, "成功");
+    // 快照目录应不存在（成功后删除）
+    const snapDir = path.join(resolveSnapshotsRoot(), meta.storyId);
+    await expect(fs.access(snapDir)).rejects.toThrow();
   });
 });
