@@ -6,6 +6,9 @@ node_modules
 out
 next-env.d.ts
 
+# build (cli)
+dist
+
 # env
 .env*.local
 
