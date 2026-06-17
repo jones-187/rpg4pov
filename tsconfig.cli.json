@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/cli/**/*.ts", "src/lib/random-tool.ts", "src/lib/workspace.ts"],
+  "exclude": ["node_modules", "tests", "src/app"]
+}
