@@ -13,6 +13,18 @@ export interface TurnRequest {
   workspaceDir: string;
   /** 主角本回合输入（与 turn/input.md 内容一致，便利字段） */
   playerInput: string;
+  /**
+   * 回合超时信号（Issue 4）。
+   * 由 Orchestrator 用 AbortSignal.timeout(ms) 创建。
+   *
+   * **Contract（强制）**：runner 必须响应此 signal：
+   * - runTurn 入口应尽早 signal.throwIfAborted()。
+   * - 长耗时操作（子进程、网络）必须把 signal 传到底层（child_process.exec / fetch）。
+   * - abort 后 runner 必须停止执行并 reject 或返回 { success: false }。
+   * 真实 CLI Runner（Issue 6）必须把 signal 传到子进程层，避免 timeout 后幽灵写入。
+   * **不接受 Promise.race-only 超时**——那样超时后 runner 仍在后台写文件，破坏回滚原子性。
+   */
+  signal: AbortSignal;
 }
 
 /** AgentRunner 返回的回合结果（不含内容，内容写文件） */

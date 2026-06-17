@@ -19,6 +19,7 @@ describe("FakeAgentRunner", () => {
       storyId: meta.storyId,
       workspaceDir: resolveWorkspaceDir(meta.storyId),
       playerInput: "推开木门",
+      signal: AbortSignal.timeout(5000),
     });
     const output = await fs.readFile(
       path.join(root, meta.storyId, "turn", "output.md"),
@@ -35,6 +36,7 @@ describe("FakeAgentRunner", () => {
       storyId: meta.storyId,
       workspaceDir: resolveWorkspaceDir(meta.storyId),
       playerInput: "观察四周",
+      signal: AbortSignal.timeout(5000),
     });
     const raw = await fs.readFile(
       path.join(root, meta.storyId, "turn", "done.json"),
@@ -52,6 +54,7 @@ describe("FakeAgentRunner", () => {
       storyId: meta.storyId,
       workspaceDir: resolveWorkspaceDir(meta.storyId),
       playerInput: "试探",
+      signal: AbortSignal.timeout(5000),
     });
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
@@ -76,6 +79,7 @@ describe("FakeAgentRunner", () => {
       storyId: meta.storyId,
       workspaceDir: resolveWorkspaceDir(meta.storyId),
       playerInput: "不动",
+      signal: AbortSignal.timeout(5000),
     });
     expect(await fs.readFile(path.join(root, meta.storyId, "world.md"), "utf8")).toBe(worldBefore);
     expect(await fs.readFile(path.join(root, meta.storyId, "player.md"), "utf8")).toBe(playerBefore);
