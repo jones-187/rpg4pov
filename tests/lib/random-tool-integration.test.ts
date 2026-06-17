@@ -100,6 +100,32 @@ class BrokenRandomLogRunner implements AgentRunner {
   }
 }
 
+class RandomThenFailsRunner implements AgentRunner {
+  observedRandomLogBeforeFailure = false;
+
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    await rollChoice({
+      storyId: req.storyId,
+      workspaceDir: req.workspaceDir,
+      rollId: "post-roll-failure",
+      candidates: [
+        { id: "success", label: "成功", weight: 1 },
+        { id: "fail", label: "失败", weight: 1 },
+      ],
+      rng: () => 0.2,
+    });
+
+    const raw = await fs.readFile(
+      path.join(req.workspaceDir, "logs", RANDOM_ROLLS_LOG),
+      "utf8",
+    );
+    this.observedRandomLogBeforeFailure = raw.includes("post-roll-failure");
+
+    await fs.writeFile(path.join(req.workspaceDir, "turn", "output.md"), "should roll back");
+    return { success: false, error: "post-roll failure" };
+  }
+}
+
 describe("Random Tool + TurnOrchestrator integration", () => {
   it("binds a success roll to player-visible output and random log", async () => {
     const meta = await createStory({ title: "success roll" });
@@ -142,6 +168,24 @@ describe("Random Tool + TurnOrchestrator integration", () => {
     const outcome = await orchestrator.executeTurn(meta.storyId, "我试着撬锁");
 
     expect(outcome.success).toBe(false);
+    expect(await readTurnOutput(meta.storyId)).toBe(outputBefore);
+    expect(await readTurnDone(meta.storyId)).toBeNull();
+    await expect(
+      fs.access(path.join(resolveWorkspaceDir(meta.storyId), "logs", RANDOM_ROLLS_LOG)),
+    ).rejects.toThrow();
+  });
+
+  it("removes an appended random log when the same turn fails later", async () => {
+    const meta = await createStory({ title: "post-roll failure rollback" });
+    const outputBefore = await readTurnOutput(meta.storyId);
+    const runner = new RandomThenFailsRunner();
+    const orchestrator = new TurnOrchestrator(runner);
+
+    const outcome = await orchestrator.executeTurn(meta.storyId, "随机后失败");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toBe("post-roll failure");
+    expect(runner.observedRandomLogBeforeFailure).toBe(true);
     expect(await readTurnOutput(meta.storyId)).toBe(outputBefore);
     expect(await readTurnDone(meta.storyId)).toBeNull();
     await expect(
