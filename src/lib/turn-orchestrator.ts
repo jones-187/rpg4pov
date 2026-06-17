@@ -11,6 +11,8 @@ import {
   createSnapshot,
   restoreSnapshot,
   deleteSnapshot,
+  markWorkspaceUnsafe,
+  readWorkspaceUnsafeMarker,
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
 
@@ -46,6 +48,16 @@ export class TurnOrchestrator {
   constructor(private runner: AgentRunner) {}
 
   async executeTurn(storyId: string, playerInput: string): Promise<TurnOutcome> {
+    // 0. 检查 workspace 是否被标记为 unsafe（上回合 rollback 失败残留）
+    const unsafe = await readWorkspaceUnsafeMarker(storyId);
+    if (unsafe) {
+      return {
+        success: false,
+        playerResponse: null,
+        error: "workspace unsafe: " + unsafe.reason,
+      };
+    }
+
     // 1. 获取串行锁。失败抛 TurnBusyError（route 转 409）。
     //    注意：锁在 snapshot 之前——并发拒绝不应留下半成品快照。
     const release = this.lock.acquire(storyId);
@@ -111,20 +123,31 @@ export class TurnOrchestrator {
    * 统一失败路径（Issue 4）。
    * 顺序：restore snapshot → best-effort 写错误日志 → 删除快照。
    * 日志在 workspace/logs/ 下，必须在整目录恢复之后写，否则被覆盖丢失。
+   * restoreSnapshot 不是 best-effort——如果失败，workspace 可能已脏，
+   * 此时写 unsafe marker 并在日志中记录 rollback failed。
    */
   private async failTurn(
     storyId: string,
     reason: string,
     playerInput: string,
   ): Promise<TurnOutcome> {
+    // restoreSnapshot 单独 try/catch——它不是 best-effort，失败需要诊断
     try {
       await restoreSnapshot(storyId);
-      // restore 成功后再写日志（best-effort）
+    } catch (restoreErr) {
+      // restore 失败：workspace 可能已脏。best-effort 写 unsafe marker + 诊断日志
+      const rollbackReason = `rollback failed: ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)}`;
+      await markWorkspaceUnsafe(storyId, rollbackReason);
+      await appendTurnError(storyId, { reason: rollbackReason, input: playerInput });
+      return { success: false, playerResponse: null, error: reason };
+    }
+
+    // restore 成功：best-effort 写错误日志 + 删除快照
+    try {
       await appendTurnError(storyId, { reason, input: playerInput });
-      // 删除本次快照
       await deleteSnapshot(storyId);
     } catch {
-      // restore/delete 失败不应阻塞向用户返回失败响应；appendTurnError 自身已 best-effort
+      // appendTurnError / deleteSnapshot 是 best-effort，不影响用户响应
     }
     return { success: false, playerResponse: null, error: reason };
   }

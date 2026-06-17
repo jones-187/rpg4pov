@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { TurnOrchestrator, TurnBusyError } from "@/lib/turn-orchestrator";
 import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
 import { createStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
+import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -45,6 +46,32 @@ class EmptyOutputRunner implements AgentRunner {
 /** 超时模拟 runner：永不返回，直到 signal abort。 */
 class HangingRunner implements AgentRunner {
   async runTurn(req: TurnRequest): Promise<TurnResult> {
+    return await new Promise<TurnResult>((_, reject) => {
+      req.signal.addEventListener("abort", () => {
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
+  }
+}
+
+/**
+ * 受控 runner：通过 started resolve 让测试方知道 runner 已拿到执行权。
+ * runner 在 started resolve 后挂起，直到 signal abort。
+ */
+class ControlledRunner implements AgentRunner {
+  readonly started: Promise<void>;
+  private resolveStarted!: () => void;
+
+  constructor() {
+    this.started = new Promise<void>((resolve) => {
+      this.resolveStarted = resolve;
+    });
+  }
+
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    this.resolveStarted();
     return await new Promise<TurnResult>((_, reject) => {
       req.signal.addEventListener("abort", () => {
         const err = new Error("aborted");
@@ -192,20 +219,20 @@ describe("TurnOrchestrator", () => {
 
   it("second concurrent turn for same storyId throws TurnBusyError", async () => {
     const meta = await createStory();
-    const orchestrator = new TurnOrchestrator(new HangingRunner());
-    // 用短超时
+    const controlled = new ControlledRunner();
+    const orchestrator = new TurnOrchestrator(controlled);
+    // 用较长超时确保 controlled runner 不会被提前 abort
     const prev = process.env.TURN_TIMEOUT_MS;
-    process.env.TURN_TIMEOUT_MS = "2000";
+    process.env.TURN_TIMEOUT_MS = "10000";
     try {
-      // 第一个回合挂起（HangingRunner 不返回），但不 await
+      // 第一个回合挂起（ControlledRunner），等它真正拿到执行权
       const p1 = orchestrator.executeTurn(meta.storyId, "第一回合");
-      // 让事件循环推进，让 p1 真正拿到锁
-      await new Promise((r) => setTimeout(r, 10));
+      await controlled.started; // 确定runner已进入runTurn
       // 第二个回合应被锁拒绝
       await expect(orchestrator.executeTurn(meta.storyId, "并发")).rejects.toThrow(
         TurnBusyError,
       );
-      // 等第一个回合超时结束（释放锁）——它返回失败 outcome，不 reject
+      // p1 会超时（10s），但我们直接等它返回即可
       const outcome1 = await p1;
       expect(outcome1.success).toBe(false);
       expect(outcome1.error).toBe("timeout");
@@ -213,6 +240,59 @@ describe("TurnOrchestrator", () => {
       if (prev === undefined) delete process.env.TURN_TIMEOUT_MS;
       else process.env.TURN_TIMEOUT_MS = prev;
     }
+  }, 15000);
+
+  it("rollback failed: writes unsafe marker and error log when restoreSnapshot fails", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+    const logsDir = path.join(wsDir, "logs");
+
+    // 让 NoopRunner 触发失败（不写 done.json）
+    // 但在 runner 执行前破坏 snapshot 目录，使 restoreSnapshot 失败
+    // 做法：用 vi.spy 拦截 restoreSnapshot 让它抛错
+    const snapshotModule = await import("@/lib/turn-snapshot");
+    const restoreSpy = vi.spyOn(snapshotModule, "restoreSnapshot").mockRejectedValue(
+      new Error("disk full"),
+    );
+
+    try {
+      const orchestrator = new TurnOrchestrator(new NoopRunner());
+      const outcome = await orchestrator.executeTurn(meta.storyId, "灾难");
+      expect(outcome.success).toBe(false);
+      // 用户响应仍返回原始失败原因（不是 rollback failed）
+      expect(outcome.error).toBe("did nothing");
+
+      // unsafe marker 被写入
+      const marker = await readWorkspaceUnsafeMarker(meta.storyId);
+      expect(marker).not.toBeNull();
+      expect(marker!.reason).toContain("rollback failed");
+      expect(marker!.reason).toContain("disk full");
+
+      // turn error log 中有 rollback failed 记录
+      const logPath = path.join(logsDir, "turn-errors.log");
+      const logRaw = await fs.readFile(logPath, "utf8");
+      const lines = logRaw.trim().split("\n");
+      const rollbackLine = lines.find((l) => l.includes("rollback failed"));
+      expect(rollbackLine).toBeDefined();
+      const entry = JSON.parse(rollbackLine!);
+      expect(entry.reason).toContain("rollback failed");
+      expect(entry.reason).toContain("disk full");
+    } finally {
+      restoreSpy.mockRestore();
+    }
+  });
+
+  it("workspace unsafe marker blocks subsequent turns", async () => {
+    const meta = await createStory();
+    // 手动写入 unsafe marker
+    const { markWorkspaceUnsafe } = await import("@/lib/turn-snapshot");
+    await markWorkspaceUnsafe(meta.storyId, "previous rollback disaster");
+
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "尝试继续");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("workspace unsafe");
+    expect(outcome.error).toContain("previous rollback disaster");
   });
 
   it("successful turn deletes its snapshot", async () => {

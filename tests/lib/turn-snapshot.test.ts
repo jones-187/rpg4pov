@@ -10,6 +10,8 @@ import {
   createSnapshot,
   restoreSnapshot,
   deleteSnapshot,
+  markWorkspaceUnsafe,
+  readWorkspaceUnsafeMarker,
 } from "@/lib/turn-snapshot";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
@@ -115,5 +117,34 @@ describe("turn-snapshot", () => {
     // .snapshots 必须在 workspace 外
     const snapInsideWorkspace = path.join(wsDir, ".snapshot");
     await expect(fs.access(snapInsideWorkspace)).rejects.toThrow();
+  });
+
+  it("markWorkspaceUnsafe writes .workspace-unsafe marker", async () => {
+    const meta = await createStory();
+    await markWorkspaceUnsafe(meta.storyId, "disk full");
+    const markerPath = path.join(resolveWorkspaceDir(meta.storyId), ".workspace-unsafe");
+    const raw = await fs.readFile(markerPath, "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.reason).toBe("disk full");
+    expect(() => new Date(parsed.at).toISOString()).not.toThrow();
+  });
+
+  it("readWorkspaceUnsafeMarker returns marker content when present", async () => {
+    const meta = await createStory();
+    await markWorkspaceUnsafe(meta.storyId, "corrupt state");
+    const marker = await readWorkspaceUnsafeMarker(meta.storyId);
+    expect(marker).not.toBeNull();
+    expect(marker!.reason).toBe("corrupt state");
+    expect(typeof marker!.at).toBe("string");
+  });
+
+  it("readWorkspaceUnsafeMarker returns null when no marker", async () => {
+    const meta = await createStory();
+    const marker = await readWorkspaceUnsafeMarker(meta.storyId);
+    expect(marker).toBeNull();
+  });
+
+  it("markWorkspaceUnsafe is best-effort (invalid storyId does not throw)", async () => {
+    await expect(markWorkspaceUnsafe("not-a-uuid", "x")).resolves.toBeUndefined();
   });
 });

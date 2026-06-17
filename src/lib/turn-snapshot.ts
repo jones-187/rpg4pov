@@ -47,3 +47,55 @@ export async function restoreSnapshot(storyId: string): Promise<void> {
 export async function deleteSnapshot(storyId: string): Promise<void> {
   await fs.rm(resolveSnapshotDir(storyId), { recursive: true, force: true });
 }
+
+/**
+ * 写入 workspace unsafe marker。
+ * 当 restoreSnapshot 失败时调用——workspace 可能已损坏（半成品状态），
+ * 后续回合检测到此 marker 时应拒绝执行，提示需人工处理。
+ * best-effort：写入失败不抛。
+ */
+export async function markWorkspaceUnsafe(
+  storyId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    if (!isValidStoryId(storyId)) return;
+    const markerPath = path.join(resolveWorkspaceDir(storyId), ".workspace-unsafe");
+    const content = JSON.stringify({
+      at: new Date().toISOString(),
+      reason,
+    });
+    await fs.writeFile(markerPath, content);
+  } catch {
+    // best-effort：workspace 本身可能已不可写
+  }
+}
+
+/**
+ * 检查 workspace 是否被标记为 unsafe。
+ * TurnOrchestrator 在回合开始前检查；route 层也可检查。
+ * 返回标记内容（含 reason）或 null（安全）。
+ */
+export async function readWorkspaceUnsafeMarker(
+  storyId: string,
+): Promise<{ at: string; reason: string } | null> {
+  try {
+    if (!isValidStoryId(storyId)) return null;
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(storyId), ".workspace-unsafe"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as Record<string, unknown>).at === "string" &&
+      typeof (parsed as Record<string, unknown>).reason === "string"
+    ) {
+      return parsed as { at: string; reason: string };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
