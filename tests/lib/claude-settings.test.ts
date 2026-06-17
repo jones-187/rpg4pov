@@ -14,15 +14,15 @@ describe("claude-settings", () => {
     expect(parsed.permissions.deny).toContain("Read(./.env)");
     expect(parsed.permissions.deny).toContain("Read(./.env.*)");
     expect(parsed.permissions.deny).toContain("Read(./secrets/**)");
+    expect(parsed.permissions.deny).toContain("Write(./.env)");
+    expect(parsed.permissions.deny).toContain("Write(./.env.*)");
+    expect(parsed.permissions.deny).toContain("Write(./secrets/**)");
   });
 
-  it("settings 含 permissions.allow，allow Bash 仅匹配 roll-choice 调用", () => {
+  it("settings allow Bash 仅一条规则且精确匹配 roll-choice 调用", () => {
     const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
-    expect(parsed.permissions.allow).toBeDefined();
     const bashRules = (parsed.permissions.allow as string[]).filter((r) => r.startsWith("Bash("));
-    for (const rule of bashRules) {
-      expect(rule).toContain("roll-choice.js");
-    }
+    expect(bashRules).toEqual(["Bash(node /app/cli/roll-choice.js:*)"]);
   });
 
   it("settings allow 含 Read/Write workspace 文件", () => {
@@ -30,6 +30,9 @@ describe("claude-settings", () => {
     const allow = parsed.permissions.allow as string[];
     expect(allow.some((r) => r.startsWith("Read("))).toBe(true);
     expect(allow.some((r) => r.startsWith("Write("))).toBe(true);
+    expect(allow).toContain("Write(./turn/output.md)");
+    expect(allow).toContain("Write(./turn/done.json)");
+    expect(allow).toContain("Read(./turn/input.md)");
   });
 
   it("settings 不含 dangerously skip permissions 或 bypassPermissions", () => {
