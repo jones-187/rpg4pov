@@ -2,16 +2,32 @@ import { describe, it, expect } from "vitest";
 import { redactSecrets, truncateForLog, sanitizeForLog } from "@/lib/diagnostics";
 
 describe("diagnostics", () => {
-  it("redactSecrets 把 ANTHROPIC_API_KEY 值替换为 [REDACTED]", () => {
+  it("redactSecrets 把 ANTHROPIC_API_KEY 值替换为 [REDACTED]（精确断言）", () => {
     const input = "error: ANTHROPIC_API_KEY=sk-ant-xxxxxx call failed";
-    const result = redactSecrets(input);
-    expect(result).toContain("[REDACTED]");
-    expect(result).not.toContain("sk-ant-xxxxxx");
+    expect(redactSecrets(input)).toBe("error: ANTHROPIC_API_KEY=[REDACTED] call failed");
   });
 
-  it("redactSecrets 处理多种 key 出现形式（=、:、空格）", () => {
-    expect(redactSecrets("ANTHROPIC_API_KEY:sk-ant-123")).toContain("[REDACTED]");
-    expect(redactSecrets("ANTHROPIC_API_KEY sk-ant-123")).toContain("[REDACTED]");
+  it("redactSecrets 处理多种 key 出现形式（=、:、空格，精确断言）", () => {
+    expect(redactSecrets("ANTHROPIC_API_KEY:sk-ant-123")).toBe("ANTHROPIC_API_KEY=[REDACTED]");
+    expect(redactSecrets("ANTHROPIC_API_KEY sk-ant-123")).toBe("ANTHROPIC_API_KEY=[REDACTED]");
+  });
+
+  it("redactSecrets 同一字符串多个 key 都被脱敏（验证 g 标志）", () => {
+    const input = "ANTHROPIC_API_KEY=sk-ant-1 then ANTHROPIC_API_KEY=sk-ant-2";
+    const result = redactSecrets(input);
+    expect(result).toBe("ANTHROPIC_API_KEY=[REDACTED] then ANTHROPIC_API_KEY=[REDACTED]");
+    expect(result).not.toContain("sk-ant-1");
+    expect(result).not.toContain("sk-ant-2");
+  });
+
+  it("redactSecrets 大小写不敏感且保留原始 key 大小写（验证 i 标志 + 捕获组）", () => {
+    expect(redactSecrets("anthropic_api_key=sk-ant-1")).toBe("anthropic_api_key=[REDACTED]");
+    expect(redactSecrets("Anthropic_Api_Key=sk-ant-2")).toBe("Anthropic_Api_Key=[REDACTED]");
+  });
+
+  it("redactSecrets 不含 key 的字符串原样返回", () => {
+    const input = "just a normal log line without secrets";
+    expect(redactSecrets(input)).toBe(input);
   });
 
   it("truncateForLog 超过限长截断并标注 truncated", () => {
@@ -24,6 +40,11 @@ describe("diagnostics", () => {
   it("truncateForLog 未超限长原样返回", () => {
     const short = "short message";
     expect(truncateForLog(short, 16_384)).toBe(short);
+  });
+
+  it("truncateForLog text.length === limit 边界原样返回（验证 <= 边界）", () => {
+    const exact = "y".repeat(16_384);
+    expect(truncateForLog(exact, 16_384)).toBe(exact);
   });
 
   it("sanitizeForLog 组合脱敏 + 限长", () => {
