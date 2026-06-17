@@ -56,8 +56,22 @@ export default function StoryPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ storyId, input: text }),
       });
-      if (!res.ok) throw new Error(`请求失败（HTTP ${res.status}）`);
-      const data = (await res.json()) as { playerResponse: string };
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Issue 4：失败响应带 retryInput 时回填输入框
+        if (data && typeof data.retryInput === "string") {
+          setInput(data.retryInput);
+        }
+        const errorMsg =
+          data && typeof data.error === "string"
+            ? data.error
+            : `请求失败（HTTP ${res.status}）`;
+        setError(errorMsg);
+        return;
+      }
+      if (!data || typeof data.playerResponse !== "string") {
+        throw new Error("响应格式错误");
+      }
       setNarration(data.playerResponse);
       setInput("");
     } catch (err) {
