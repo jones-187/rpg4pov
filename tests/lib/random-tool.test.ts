@@ -120,6 +120,29 @@ describe("rollChoice", () => {
     });
   });
 
+  it("uses crypto randomness when rng is omitted", async () => {
+    const meta = await createStory({ title: "crypto random source" });
+    const result = await rollChoice({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      rollId: "crypto-smoke",
+      candidates: [{ id: "only", label: "唯一结果", weight: 1 }],
+    });
+
+    expect(result.randomSource).toBe("crypto");
+    expect(result.selectedId).toBe("only");
+    expect(Number.isFinite(result.sample)).toBe(true);
+    expect(result.sample).toBeGreaterThanOrEqual(0);
+    expect(result.sample).toBeLessThan(1);
+    const logs = await readRandomLogs(meta.storyId);
+    expect(logs[0]).toMatchObject({
+      rollId: "crypto-smoke",
+      selectedId: "only",
+      randomSource: "crypto",
+      sample: result.sample,
+    });
+  });
+
   it("rejects missing or blank rollId", async () => {
     const meta = await createStory();
     await expect(
