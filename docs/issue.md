@@ -62,10 +62,16 @@ Web 输入
 **Type**: AFK
 **Blocked by**: Issue 3
 **User stories covered**: 技术架构 PRD US 35-48, 61-63
+**Status**: 实现 + 测试完成
+- ✅ 代码实现完成（8 个提交对应 plan 的 8 个 Task）
+- ✅ 单元测试全绿：turn-lock（7）/ turn-snapshot（8）/ turn-error-log（4）/ orchestrator（11，含 rollback/timeout/lock）/ route（8）/ workspace（23）/ fake-agent-runner（4）
+- ✅ TypeScript 类型检查通过
+- ⏭️ 待验证：浏览器人工冒烟（失败回填——Fake Agent 下难触发，由代码审查保证）
+- ⏭️ 待验证：Docker 容器内冒烟（与本机无 Docker 同阻塞项，留 Issue 1 验证环境）
 
 **目标行为**：同一个 storyId 同一时间只能执行一个回合。每回合执行前创建快照。Fake Agent 成功时正常返回固定输出；Fake Agent 超时、失败、未生成固定输出或基础校验失败时，系统回滚到回合前状态，并向用户展示可重试的失败提示。
 
-这一片把“agent 直接写 workspace”的风险压住，防止半成品状态污染故事。
+这一片把”agent 直接写 workspace”的风险压住，防止半成品状态污染故事。
 
 ------
 
