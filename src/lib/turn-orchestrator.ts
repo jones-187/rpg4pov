@@ -139,6 +139,7 @@ export class TurnOrchestrator {
       const rollbackReason = `rollback failed: ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)}`;
       await markWorkspaceUnsafe(storyId, rollbackReason);
       await appendTurnError(storyId, { reason: rollbackReason, input: playerInput });
+      // 不删除 snapshot——灾难路径下 snapshot 是后续人工恢复/排查的最后依据
       return { success: false, playerResponse: null, error: reason };
     }
 

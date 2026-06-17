@@ -277,6 +277,10 @@ describe("TurnOrchestrator", () => {
       const entry = JSON.parse(rollbackLine!);
       expect(entry.reason).toContain("rollback failed");
       expect(entry.reason).toContain("disk full");
+
+      // snapshot 目录被保留（灾难路径下是人工恢复/排查的最后依据）
+      const snapDir = path.join(resolveSnapshotsRoot(), meta.storyId);
+      await expect(fs.access(snapDir)).resolves.toBeUndefined();
     } finally {
       restoreSpy.mockRestore();
     }
