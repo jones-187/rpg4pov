@@ -88,6 +88,8 @@ describe("TurnOrchestrator", () => {
     const outcome = await orchestrator.executeTurn(meta.storyId, "沉默");
     expect(outcome.success).toBe(false);
     expect(outcome.playerResponse).toBeNull();
+    // 锁住失败原因，供 Issue 4 诊断日志与未来失败码分类使用
+    expect(outcome.error).toBe("output missing or empty");
   });
 
   it("clears old done.json before calling runner", async () => {
