@@ -84,3 +84,13 @@ describe("POST /api/story-turn (Issue 2: storyId-bound, reads only turn/output.m
     expect(json.playerResponse).toBe(await readTurnOutput(storyId));
   });
 });
+
+describe("POST /api/story-turn (Issue 4 regression)", () => {
+  it("still returns 200 with playerResponse on success (Fake Agent)", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "Issue 4 回归" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.playerResponse).toContain("Issue 4 回归");
+  });
+});
