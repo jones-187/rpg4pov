@@ -26,6 +26,16 @@ export function isValidStoryId(id: string): boolean {
   return STORY_ID_RE.test(id);
 }
 
+/**
+ * snapshots 根目录（Issue 4）。
+ * 快照存放在 Story Workspace 之外：{WORKSPACE_ROOT}/.snapshots/{storyId}/。
+ * 不是 Story Workspace 的一部分——见 CONTEXT.md「Turn Snapshot」。
+ * listStories 已用 isValidStoryId 过滤，.snapshots 非 UUID，自动被忽略，零改动。
+ */
+export function resolveSnapshotsRoot(): string {
+  return path.resolve(resolveWorkspaceRoot(), ".snapshots");
+}
+
 export function resolveWorkspaceDir(storyId: string): string {
   if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
   return path.resolve(resolveWorkspaceRoot(), storyId);

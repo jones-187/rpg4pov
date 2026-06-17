@@ -13,6 +13,7 @@ import {
   writeTurnInput,
   resolveWorkspaceDir,
   resolveWorkspaceRoot,
+  resolveSnapshotsRoot,
 } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
@@ -194,5 +195,11 @@ describe("resolveWorkspaceDir", () => {
 describe("resolveWorkspaceRoot", () => {
   it("resolves WORKSPACE_ROOT when set", () => {
     expect(resolveWorkspaceRoot()).toBe(path.resolve(root));
+  });
+});
+
+describe("resolveSnapshotsRoot", () => {
+  it("resolves to .snapshots under WORKSPACE_ROOT", () => {
+    expect(resolveSnapshotsRoot()).toBe(path.resolve(root, ".snapshots"));
   });
 });
