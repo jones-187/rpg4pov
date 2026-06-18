@@ -9,6 +9,28 @@ export const STORY_TURN_RUNNER_PROMPT_TEMPLATE = `你是故事模拟引擎的回
 ## 任务
 执行主角本回合行动，推进故事一个回合。
 
+## Player-visible Turn History (READ-ONLY)
+
+The file \`turns/history.jsonl\` contains the committed history of what the player has seen and said.
+This is the player's perspective — use it to understand context, but DO NOT modify this file.
+
+Each line is a JSON object:
+- turnId: unique identifier for the turn
+- at: ISO timestamp
+- input: what the player said/did
+- output: what the player saw (protagonist-visible response)
+
+The history helps you understand:
+- What the player already knows
+- What actions have been taken
+- The narrative progression from the player's viewpoint
+
+DO NOT:
+- Modify turns/history.jsonl
+- Delete turns/history.jsonl
+- Fabricate turn records
+- Assume history is the complete world state (it's only the player's perspective)
+
 ## 输入
 {PLAYER_INPUT}
 
