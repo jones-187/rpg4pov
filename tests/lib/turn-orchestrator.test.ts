@@ -6,6 +6,7 @@ import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
 import { createStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
 import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
+import { readTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -306,5 +307,87 @@ describe("TurnOrchestrator", () => {
     // 快照目录应不存在（成功后删除）
     const snapDir = path.join(resolveSnapshotsRoot(), meta.storyId);
     await expect(fs.access(snapDir)).rejects.toThrow();
+  });
+
+  // --- Issue 6.5 新增测试 ---
+
+  it("successful turn appends entry to turns/history.jsonl (Issue 6.5)", async () => {
+    const meta = await createStory({ title: "history append 测试" });
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "推开木门");
+
+    expect(outcome.success).toBe(true);
+
+    // 验证 history 被追加
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).not.toBeNull();
+    expect(history!.length).toBe(1);
+
+    const entry = history![0];
+    expect(entry.input).toBe("推开木门");
+    expect(entry.output).toBe(outcome.playerResponse);
+    expect(entry.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(entry.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("failed turn does not append to history (Issue 6.5)", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new NoopRunner()); // 不写 done.json
+    const outcome = await orchestrator.executeTurn(meta.storyId, "失败测试");
+
+    expect(outcome.success).toBe(false);
+
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).toEqual([]);
+  });
+
+  it("history append failure causes turn to fail and rollback (Issue 6.5)", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+
+    // 记录回合前状态
+    const outputBefore = await fs.readFile(path.join(wsDir, "turn", "output.md"), "utf8");
+    const doneBefore = await fs.readFile(path.join(wsDir, "turn", "done.json"), "utf8").catch(() => null);
+
+    // 让 FakeAgentRunner 成功执行，但 appendTurnHistory 失败
+    const historyModule = await import("@/lib/turn-history");
+    const appendSpy = vi.spyOn(historyModule, "appendTurnHistory").mockRejectedValue(
+      new Error("disk full"),
+    );
+
+    try {
+      const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+      const outcome = await orchestrator.executeTurn(meta.storyId, "灾难测试");
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBeDefined();
+
+      // history 未被写入（因为 append 失败）
+      const history = await readTurnHistory(meta.storyId);
+      expect(history).toEqual([]);
+
+      // Issue 6.5 反馈 3：验证 rollback 真的发生
+      // turn/output.md 恢复到回合前状态
+      const outputAfter = await fs.readFile(path.join(wsDir, "turn", "output.md"), "utf8");
+      expect(outputAfter).toBe(outputBefore);
+
+      // done.json 恢复到回合前状态（或不存在）
+      const doneAfter = await fs.readFile(path.join(wsDir, "turn", "done.json"), "utf8").catch(() => null);
+      expect(doneAfter).toBe(doneBefore);
+    } finally {
+      appendSpy.mockRestore();
+    }
+  });
+
+  it("successful turn returns committed TurnHistoryEntry (Issue 6.5)", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "测试返回");
+
+    expect(outcome.success).toBe(true);
+    expect(outcome.turn).toBeDefined();
+    expect(outcome.turn!.input).toBe("测试返回");
+    expect(outcome.turn!.output).toBe(outcome.playerResponse);
+    expect(outcome.turn!.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 });
