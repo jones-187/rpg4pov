@@ -9,6 +9,16 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/cli/**/*.ts", "src/lib/random-tool.ts", "src/lib/workspace.ts"],
+  "include": [
+    "src/cli/**/*.ts",
+    "src/lib/random-tool.ts",
+    "src/lib/workspace.ts",
+    "src/lib/claude-code-runner.ts",
+    "src/lib/claude-settings.ts",
+    "src/lib/claude-prompt.ts",
+    "src/lib/turn-history.ts",
+    "src/lib/agent-runner.ts",
+    "src/lib/diagnostics.ts"
+  ],
   "exclude": ["node_modules", "tests", "src/app"]
 }
