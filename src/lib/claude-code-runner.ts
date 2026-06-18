@@ -211,7 +211,7 @@ function defaultSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<Spa
   return new Promise((resolve, reject) => {
     const child = realSpawn(cmd, args, {
       cwd: opts.cwd,
-      env: opts.env,
+      env: opts.env as NodeJS.ProcessEnv,
       stdio: opts.stdio,
     }) as ChildProcess;
 
@@ -233,6 +233,6 @@ function defaultSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<Spa
     });
 
     // 暴露 child 以便 runTurn 在 abort 时 kill（测试 hack 兼生产用）
-    opts._child = child;
+    opts._child = { kill: (sig) => child.kill(sig as any) };
   });
 }
