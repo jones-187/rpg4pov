@@ -88,6 +88,10 @@ MVP 技术路线：
 30. 凭证通过环境变量注入。
 31. 镜像不内置任何凭证。
 32. 故事初始化由用户自然语言输入 + agent 自动初始化 Story Workspace 完成。
+33. Player-visible Turn History 保存到 `turns/history.jsonl`。
+34. 刷新页面后展示完整已提交历史。
+35. agent 冷启动时读取历史作为上下文，但不能修改历史文件。
+36. 历史追加失败视为回合失败并回滚。
 
 #### P1 / Post-MVP
 
@@ -207,6 +211,12 @@ MVP 技术路线：
 73. As a developer, I want this PRD to define what is P0 and what is not, so that agent implementation does not expand into non-MVP work.
 74. As a developer, I want to keep implementation details out of this PRD, so that technical design can be done separately without over-constraining code.
 75. As a developer, I want testing seams defined at the architecture level, so that later issues can be tested by behavior rather than internal implementation.
+76. As a player, I want to see my committed turn history after page refresh, so that I can continue the story without losing context.
+77. As a player, I want each turn in history to show what I input and what the protagonist saw, so that I can review what happened.
+78. As a developer, I want turn history stored in `turns/history.jsonl`, so that it is separate from scratch files in `turn/`.
+79. As a developer, I want turn history to be append-only, so that past turns cannot be retroactively modified.
+80. As a developer, I want the agent runner to read turn history for context but not modify it, so that history remains a stable record.
+81. As a developer, I want history append failure to cause turn failure and rollback, so that incomplete history is not preserved.
 
 ## Implementation Decisions
 

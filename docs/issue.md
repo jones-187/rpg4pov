@@ -117,7 +117,7 @@ agent 不自己假装随机
 
 **Type**: AFK
 **Blocked by**: Issue 6
-**User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63
+**User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63, 76-81
 
 **目标行为**：系统保存玩家可见的回合历史到 `turns/history.jsonl`。刷新页面后能展示完整已提交历史。Claude Code Runner 冷启动时读取历史作为玩家已见/已说的上下文，但不修改历史文件。
 
