@@ -18,11 +18,11 @@ import { appendTurnError } from "./turn-error-log";
 import { appendTurnHistory, type TurnHistoryEntry } from "./turn-history";
 import crypto from "node:crypto";
 
-/** 默认回合超时 60s（Issue 4）。可经 TURN_TIMEOUT_MS 覆盖。 */
+/** 默认回合超时 300s（Issue 6）。可经 TURN_TIMEOUT_MS 覆盖。 */
 function resolveTurnTimeoutMs(): number {
   const raw = process.env.TURN_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300000;
 }
 
 /**
@@ -86,30 +86,36 @@ export class TurnOrchestrator {
 
     // 5. 构造回合请求（含超时信号）
     const workspaceDir = resolveWorkspaceDir(storyId);
-    const signal = AbortSignal.timeout(resolveTurnTimeoutMs());
+    const timeoutMs = resolveTurnTimeoutMs();
+    const signal = AbortSignal.timeout(timeoutMs);
     const req = { storyId, workspaceDir, playerInput, signal };
+    const startedAt = Date.now();
 
     // 6. 调用 runner（捕获异常，统一转失败）
     let result: TurnResult;
     try {
       result = await this.runner.runTurn(req);
     } catch (err) {
-      const reason =
-        err instanceof Error && err.name === "AbortError"
-          ? "timeout"
-          : "runner crashed";
-      return await this.failTurn(storyId, reason, playerInput);
+      const durationMs = Date.now() - startedAt;
+      const isTimeout = err instanceof Error && err.name === "AbortError";
+      const reason = isTimeout ? "timeout" : "runner crashed";
+      const detail = isTimeout
+        ? `timeout after ${durationMs}ms (limit=${timeoutMs}ms)`
+        : undefined;
+      return await this.failTurn(storyId, reason, playerInput, detail);
     }
 
     // 7. 磁盘权威检查：done.json 必须存在且 status=success
     const done = await readTurnDone(storyId);
     if (!done || done.status !== "success") {
-      return await this.failTurn(
-        storyId,
-        result.error ?? "done marker missing",
-        playerInput,
-        result.detail,
-      );
+      // runner 返回 "aborted" 且 signal 已超时 → 改记 "timeout"，附带 duration
+      const isTimeout = result.error === "aborted" && signal.aborted;
+      const reason = isTimeout ? "timeout" : (result.error ?? "done marker missing");
+      const durationMs = Date.now() - startedAt;
+      const detail = isTimeout
+        ? `timeout after ${durationMs}ms (limit=${timeoutMs}ms)\n${result.detail ?? ""}`
+        : result.detail;
+      return await this.failTurn(storyId, reason, playerInput, detail);
     }
 
     // 8. output.md 必须存在且非空

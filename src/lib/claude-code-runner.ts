@@ -1,8 +1,4 @@
 import { spawn as realSpawn, type ChildProcess } from "node:child_process";
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import crypto from "node:crypto";
 import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
 import { buildPrompt } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
@@ -19,7 +15,9 @@ export interface SpawnOpts {
   cwd: string;
   env: Record<string, string | undefined>;
   signal: AbortSignal;
-  stdio: "pipe";
+  /** stdin 内容：runTurn 传完整 prompt，spawn 后立即 child.stdin.end() */
+  stdinData: string;
+  stdio: ["pipe", "pipe", "pipe"];
   /** 测试 hack：暴露 ChildProcess 以便 runTurn 在 abort 时 kill（真实 spawn 由 defaultSpawn 挂载） */
   _child?: { kill(sig: string): void };
 }
@@ -75,7 +73,8 @@ const SIGKILL_GRACE_MS = 5_000;
  * 这样 kill 逻辑集中在 runTurn，无论 spawnFn 是 defaultSpawn（生产）还是 mock（测试），
  * abort 时都能经 opts._child kill 子进程，便于单元测试验证。
  *
- * prompt 经临时文件传递（不放 argv/workspace），finally 清理。
+ * prompt 经 stdin 传递（child.stdin.end(fullPrompt)），claude -p 从 stdin 读取。
+ * 不再使用临时文件，避免 claude CLI 因 stdin pipe 无数据而等待 3s 超时。
  * env 白名单传递，禁止全量继承。
  * 成功不写 stdout/stderr；失败写脱敏+限长诊断到 logs/turn-errors.log。
  */
@@ -98,15 +97,14 @@ export class ClaudeCodeRunner implements AgentRunner {
     req.signal.throwIfAborted();
 
     const prompt = this.promptTemplate(req.playerInput);
-    // promptFile 在 try 外声明，确保 finally 可访问（writeTempPrompt 失败时为 undefined）
-    let promptFile: string | undefined;
 
     // 构造 spawn opts，abort listener 通过 opts._child kill 子进程
     const spawnOpts: SpawnOpts = {
       cwd: req.workspaceDir,
       env: buildEnvWhitelist(),
       signal: req.signal,
-      stdio: "pipe",
+      stdinData: prompt,
+      stdio: ["pipe", "pipe", "pipe"],
     };
     // 保存 killChildGradual 返回的 clear 函数，finally 中调用以避免 event loop 延迟退出
     let clearKillTimer: (() => void) | undefined;
@@ -117,13 +115,9 @@ export class ClaudeCodeRunner implements AgentRunner {
 
     try {
       req.signal.throwIfAborted();
-      // prompt 经临时文件传递，然后作为 claude CLI 的位置参数传入
-      // Claude CLI v2 -p 支持：stdin 管道或位置参数
-      const promptFilePath = await writeTempPrompt(prompt);
-      promptFile = promptFilePath;
 
       const args = [
-        "-p", // 非交互模式
+        "-p", // 非交互模式，从 stdin 读取 prompt
         "--output-format",
         "json",
         // 权限通过 --settings + --permission-mode auto 控制：
@@ -133,7 +127,6 @@ export class ClaudeCodeRunner implements AgentRunner {
         "auto",
         "--settings",
         CLAUDE_SETTINGS_PATH,
-        promptFilePath, // prompt 作为位置参数
       ];
       const result = await this.spawnFn(this.claudePath, args, spawnOpts);
 
@@ -174,10 +167,6 @@ export class ClaudeCodeRunner implements AgentRunner {
       req.signal.removeEventListener("abort", onAbort);
       // 清理 SIGKILL escalate timer，避免 event loop 延迟 5s 退出
       clearKillTimer?.();
-      // 临时 prompt 文件用完即删（writeTempPrompt 失败时 promptFile 为 undefined，跳过）
-      if (promptFile) {
-        await safeUnlink(promptFile);
-      }
     }
   }
 }
@@ -204,26 +193,10 @@ function buildEnvWhitelist(): Record<string, string | undefined> {
   return { ...env, ...RUNNER_FIXED_ENV };
 }
 
-/** 写临时 prompt 文件到 {tmpdir}/claude-prompts/<random>.md，不放 workspace */
-async function writeTempPrompt(prompt: string): Promise<string> {
-  const dir = path.join(os.tmpdir(), "claude-prompts");
-  await fs.mkdir(dir, { recursive: true });
-  const file = path.join(dir, `prompt-${crypto.randomUUID()}.md`);
-  await fs.writeFile(file, prompt, "utf8");
-  return file;
-}
-
-async function safeUnlink(file: string): Promise<void> {
-  try {
-    await fs.unlink(file);
-  } catch {
-    // best-effort
-  }
-}
-
 /**
- * 默认 spawn 实现：真实 child_process.spawn + 收集 stdout/stderr + 挂 _child。
+ * 默认 spawn 实现：真实 child_process.spawn + stdin 传递 + 收集 stdout/stderr + 挂 _child。
  * 不负责 kill（kill 策略由 runTurn 经 opts._child 执行）。
+ * stdin 内容从 opts.stdinData 读取，spawn 后立即 child.stdin.end() 写入并关闭。
  */
 export function defaultSpawn(
   cmd: string,
@@ -236,6 +209,9 @@ export function defaultSpawn(
       env: opts.env as NodeJS.ProcessEnv,
       stdio: opts.stdio,
     }) as ChildProcess;
+
+    // 立即写入 prompt 到 stdin 并关闭，避免 claude CLI 因 stdin 无数据而等待 3s
+    child.stdin?.end(opts.stdinData);
 
     let stdout = "";
     let stderr = "";
