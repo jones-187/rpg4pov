@@ -76,6 +76,14 @@ describe("createStory", () => {
     expect(raw).toContain(`title: ${meta.title}`);
     expect(raw).toContain(`createdAt: ${meta.createdAt}`);
   });
+
+  it("creates turns/history.jsonl (empty file)", async () => {
+    const meta = await createStory({ title: "history 初始化测试" });
+    const historyPath = path.join(root, meta.storyId, "turns", "history.jsonl");
+    await expect(fs.access(historyPath)).resolves.toBeUndefined();
+    const content = await fs.readFile(historyPath, "utf8");
+    expect(content).toBe("");
+  });
 });
 
 describe("listStories", () => {
