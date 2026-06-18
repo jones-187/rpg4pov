@@ -49,7 +49,10 @@ export async function POST(request: Request) {
         { status: 500 },
       );
     }
-    return NextResponse.json({ playerResponse: outcome.playerResponse });
+    return NextResponse.json({
+      playerResponse: outcome.playerResponse,
+      turn: outcome.turn, // Issue 6.5: 返回 committed entry
+    });
   } catch (e) {
     if (e instanceof TurnBusyError) {
       return NextResponse.json(
