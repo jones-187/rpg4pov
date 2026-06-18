@@ -59,12 +59,9 @@ describe("ClaudeCodeRunner integration (fake-claude)", () => {
     });
 
     expect(result.success).toBe(false);
-
-    const logContent = await fs.readFile(
-      path.join(wsDir, "logs", "turn-errors.log"),
-      "utf8",
-    );
-    expect(logContent).toContain("non-zero exit");
+    // runner 不再直接写日志，detail 返回给 Orchestrator 在 restoreSnapshot 后写
+    expect(result.detail).toBeDefined();
+    expect(result.detail).toContain("exit=1");
   });
 
   it("missing-output mode: fake-claude only writes done.json, runner returns {success:true}", async () => {

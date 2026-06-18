@@ -25,12 +25,18 @@ describe("diagnostics", () => {
     expect(redactSecrets(input)).toBe("error: ANTHROPIC_AUTH_TOKEN=[REDACTED] call failed");
   });
 
-  it("redactSecrets 同时脱敏 ANTHROPIC_API_KEY 和 ANTHROPIC_AUTH_TOKEN", () => {
-    const input = "ANTHROPIC_API_KEY=sk-ant-1 and ANTHROPIC_AUTH_TOKEN=sk-custom-2";
+  it("redactSecrets 脱敏 ANTHROPIC_BASE_URL（第三方代理 URL 可能含认证信息）", () => {
+    const input = "ANTHROPIC_BASE_URL=https://proxy.example.com/my-secret-key/v1";
+    expect(redactSecrets(input)).toBe("ANTHROPIC_BASE_URL=[REDACTED]");
+  });
+
+  it("redactSecrets 同时脱敏 ANTHROPIC_API_KEY、ANTHROPIC_AUTH_TOKEN 和 ANTHROPIC_BASE_URL", () => {
+    const input = "ANTHROPIC_API_KEY=sk-ant-1 and ANTHROPIC_AUTH_TOKEN=sk-custom-2 and ANTHROPIC_BASE_URL=https://proxy/v1";
     const result = redactSecrets(input);
-    expect(result).toBe("ANTHROPIC_API_KEY=[REDACTED] and ANTHROPIC_AUTH_TOKEN=[REDACTED]");
+    expect(result).toBe("ANTHROPIC_API_KEY=[REDACTED] and ANTHROPIC_AUTH_TOKEN=[REDACTED] and ANTHROPIC_BASE_URL=[REDACTED]");
     expect(result).not.toContain("sk-ant-1");
     expect(result).not.toContain("sk-custom-2");
+    expect(result).not.toContain("proxy");
   });
 
   it("redactSecrets 大小写不敏感且保留原始 key 大小写（验证 i 标志 + 捕获组）", () => {

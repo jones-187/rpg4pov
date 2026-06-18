@@ -33,6 +33,12 @@ export interface TurnResult {
   success: boolean;
   /** 失败时的内部诊断信息 */
   error?: string;
+  /**
+   * 失败时的诊断详情（Issue 6 扩展）。
+   * 承载脱敏+限长的 stdout/stderr 摘要，由 Orchestrator 在 restoreSnapshot 之后写入日志。
+   * Runner 不直接写日志，避免 restoreSnapshot 覆盖丢失。
+   */
+  detail?: string;
 }
 
 /**

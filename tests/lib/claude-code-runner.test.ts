@@ -132,7 +132,7 @@ describe("ClaudeCodeRunner", () => {
     ).rejects.toThrow();
   });
 
-  it("非零退出码返回 {success:false, error}，写脱敏+限长诊断到 logs/turn-errors.log", async () => {
+  it("非零退出码返回 {success:false, error, detail}，detail 含脱敏信息", async () => {
     const meta = await createStory();
     const { spawn } = makeMockSpawn({
       code: 1,
@@ -148,12 +148,10 @@ describe("ClaudeCodeRunner", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
-    const logContent = await fs.readFile(
-      path.join(resolveWorkspaceDir(meta.storyId), "logs", "turn-errors.log"),
-      "utf8",
-    );
-    expect(logContent).toContain("[REDACTED]");
-    expect(logContent).not.toContain("sk-leak-xxx");
+    // detail 包含脱敏后的诊断（runner 不再直接写日志，由 Orchestrator 写）
+    expect(result.detail).toBeDefined();
+    expect(result.detail).toContain("[REDACTED]");
+    expect(result.detail).not.toContain("sk-leak-xxx");
   });
 
   it("abort signal 触发时 kill 子进程（SIGTERM），返回失败", async () => {
@@ -190,7 +188,7 @@ describe("ClaudeCodeRunner", () => {
     expect(killedSignals).toContain("SIGTERM");
   });
 
-  it("spawnFn 抛普通异常（非 AbortError）返回 {success:false, error:'runner crashed'} 并写日志", async () => {
+  it("spawnFn 抛普通异常（非 AbortError）返回 {success:false, error:'runner crashed', detail}", async () => {
     const meta = await createStory();
     // mock spawnFn 抛普通 Error，触发 catch 块的 "runner crashed" 路径
     const spawn: SpawnFn = () => Promise.reject(new Error("spawn ENOENT"));
@@ -203,12 +201,7 @@ describe("ClaudeCodeRunner", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toBe("runner crashed");
-    // 验证诊断日志被写入，含 reason: "runner crashed"
-    const logContent = await fs.readFile(
-      path.join(resolveWorkspaceDir(meta.storyId), "logs", "turn-errors.log"),
-      "utf8",
-    );
-    expect(logContent).toContain("runner crashed");
-    expect(logContent).toContain("spawn ENOENT");
+    // detail 包含异常信息（runner 不再直接写日志）
+    expect(result.detail).toContain("spawn ENOENT");
   });
 });

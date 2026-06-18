@@ -14,7 +14,8 @@ export function redactSecrets(text: string): string {
   // 但脱敏场景下过度脱敏优于漏脱敏，故接受该副作用。
   return text
     .replace(/(ANTHROPIC_API_KEY)[\s:=]+\S+/gi, "$1=[REDACTED]")
-    .replace(/(ANTHROPIC_AUTH_TOKEN)[\s:=]+\S+/gi, "$1=[REDACTED]");
+    .replace(/(ANTHROPIC_AUTH_TOKEN)[\s:=]+\S+/gi, "$1=[REDACTED]")
+    .replace(/(ANTHROPIC_BASE_URL)[\s:=]+\S+/gi, "$1=[REDACTED]");
 }
 
 /** 超过限长截断并标注 truncated */
