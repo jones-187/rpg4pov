@@ -10,15 +10,20 @@ interface StoryMeta {
   createdAt: string;
 }
 
+interface TurnHistoryEntry {
+  turnId: string;
+  at: string;
+  input: string;
+  output: string;
+}
+
 export default function StoryPage() {
   const params = useParams<{ storyId: string }>();
   const storyId = params.storyId;
 
   const [title, setTitle] = useState<string>("");
   const [notFound, setNotFound] = useState<boolean>(false);
-  const [narration, setNarration] = useState<string>(
-    "故事已创建。在下方输入主角的第一回合行动，然后点击发送。"
-  );
+  const [history, setHistory] = useState<TurnHistoryEntry[]>([]);
   const [input, setInput] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,8 +38,14 @@ export default function StoryPage() {
           return;
         }
         if (!res.ok) throw new Error(`加载失败（HTTP ${res.status}）`);
-        const meta = (await res.json()) as StoryMeta;
-        if (!cancelled) setTitle(meta.title);
+        const data = (await res.json()) as {
+          story: StoryMeta;
+          history: TurnHistoryEntry[];
+        };
+        if (!cancelled) {
+          setTitle(data.story.title);
+          setHistory(data.history);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "未知错误");
       }
@@ -72,7 +83,21 @@ export default function StoryPage() {
       if (!data || typeof data.playerResponse !== "string") {
         throw new Error("响应格式错误");
       }
-      setNarration(data.playerResponse);
+      // Issue 6.5 反馈 4：成功响应必须有 committed turn
+      if (!data.turn || typeof data.turn !== "object") {
+        throw new Error("响应格式错误：缺少 committed turn");
+      }
+      // 验证 turn 结构
+      const turn = data.turn as TurnHistoryEntry;
+      if (
+        typeof turn.turnId !== "string" ||
+        typeof turn.at !== "string" ||
+        typeof turn.input !== "string" ||
+        typeof turn.output !== "string"
+      ) {
+        throw new Error("响应格式错误：turn 结构不正确");
+      }
+      setHistory((prev) => [...prev, turn]);
       setInput("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
@@ -95,9 +120,24 @@ export default function StoryPage() {
     <main className="container">
       <Link href="/" className="link">← 返回首页</Link>
       <h1>{title || "…"}</h1>
+
       <section className="story" aria-label="故事显示区">
-        {narration}
+        {history.length === 0 ? (
+          <p className="muted">故事已创建。在下方输入主角的第一回合行动，然后点击发送。</p>
+        ) : (
+          history.map((turn, idx) => (
+            <div key={turn.turnId} className="turn-entry">
+              <div className="turn-input">
+                <strong>玩家输入：</strong>{turn.input}
+              </div>
+              <div className="turn-output">
+                {turn.output}
+              </div>
+            </div>
+          ))
+        )}
       </section>
+
       <form onSubmit={handleSubmit} className="input-form" aria-label="主角输入">
         <textarea
           value={input}
