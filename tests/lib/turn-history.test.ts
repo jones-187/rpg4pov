@@ -65,9 +65,10 @@ describe("turn-history", () => {
       });
 
       const history = await readTurnHistory(meta.storyId);
-      expect(history).toHaveLength(2);
-      expect(history[0].turnId).toBe("turn-1");
-      expect(history[1].turnId).toBe("turn-2");
+      expect(history).not.toBeNull();
+      expect(history!.length).toBe(2);
+      expect(history![0].turnId).toBe("turn-1");
+      expect(history![1].turnId).toBe("turn-2");
     });
 
     // Issue 6.5 反馈 1：兼容旧 story workspace（turns/ 不存在）
@@ -123,9 +124,10 @@ describe("turn-history", () => {
       });
 
       const history = await readTurnHistory(meta.storyId);
-      expect(history).toHaveLength(1);
-      expect(history[0].input).toBe("输入");
-      expect(history[0].output).toBe("输出");
+      expect(history).not.toBeNull();
+      expect(history!.length).toBe(1);
+      expect(history![0].input).toBe("输入");
+      expect(history![0].output).toBe("输出");
     });
 
     it("returns null for invalid storyId", async () => {
