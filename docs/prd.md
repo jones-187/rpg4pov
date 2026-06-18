@@ -63,22 +63,23 @@ P0 是第一版必须具备的能力，否则核心体验不成立。
 2. 纯主角模式。
 3. God State 与主角视窗隔离。
 4. Player Knowledge Log。
-5. NPC 私有记忆。
-6. 用户输入拆分为行动意图、主角台词、玩家推理假设。
-7. 玩家控制主角意图，系统控制世界结果。
-8. 冲突、风险、不确定、高后果动作需要判定。
-9. NPC 现场台词和动作由角色代理生成。
-10. 主流程控制器负责调度、判定、过滤、落库和日志。
-11. 工具真随机。
-12. 随机判定日志。
-13. 后台事件以摘要方式生成，不完整模拟 NPC 私下长对话。
-14. 允许失败、误会、错过机会、关系恶化和不可逆后果。
-15. 基础 NPC 关系与认知记录。
-16. 临时角色可以自然出现，并写入内部日志。
-17. 临时角色在剧情中变重要后可以升级为正式 NPC。
-18. 系统生成角色不主动提示用户，只在故事中自然出现。
-19. 系统生成角色必须有知识边界，不能直接替主角解开主线问题。
-20. 用户只能输入角色卡设定，不直接查看或调整内部数值。
+5. Player-visible Turn History（玩家可见的已提交回合历史）。
+6. NPC 私有记忆。
+7. 用户输入拆分为行动意图、主角台词、玩家推理假设。
+8. 玩家控制主角意图，系统控制世界结果。
+9. 冲突、风险、不确定、高后果动作需要判定。
+10. NPC 现场台词和动作由角色代理生成。
+11. 主流程控制器负责调度、判定、过滤、落库和日志。
+12. 工具真随机。
+13. 随机判定日志。
+14. 后台事件以摘要方式生成，不完整模拟 NPC 私下长对话。
+15. 允许失败、误会、错过机会、关系恶化和不可逆后果。
+16. 基础 NPC 关系与认知记录。
+17. 临时角色可以自然出现，并写入内部日志。
+18. 临时角色在剧情中变重要后可以升级为正式 NPC。
+19. 系统生成角色不主动提示用户，只在故事中自然出现。
+20. 系统生成角色必须有知识边界，不能直接替主角解开主线问题。
+21. 用户只能输入角色卡设定，不直接查看或调整内部数值。
 
 #### P1 / Post-MVP
 
@@ -191,36 +192,40 @@ P2 是高级模拟能力，暂不作为近期目标。
 68. As a player, I want major NPC decisions to use character personality and random judgment, so that they are neither scripted nor arbitrary.
 69. As a player, I want group scenes to avoid every NPC speaking every turn, so that dialogue feels natural.
 70. As a player, I want some NPCs to only react silently, so that scenes can include tension without overcrowded dialogue.
-71. As a player, I want interruptions and silence to be possible, so that group dynamics feel organic.
-72. As a player, I want the system to decide who has speaking priority in a scene, so that group conversations do not become mechanical turn-taking.
-73. As a player, I want the selected NPC’s own agent to generate the actual words, so that speech stays character-specific.
-74. As a player, I want the system to avoid exposing hidden thoughts in the visible narration, so that private intent remains private.
-75. As a player, I want visible narration to include observable behavior and atmosphere, so that scenes are readable without leaking truth.
-76. As a player, I want the protagonist view to be novel-like but limited, so that I get rich description without omniscience.
-77. As a player, I want hidden NPC thoughts to affect future behavior, so that inner states matter even when I cannot see them.
-78. As a system maintainer, I want NPC output to separate visible dialogue, visible action, private memory changes and hidden intent, so that visibility filtering is reliable.
-79. As a system maintainer, I want the controller to validate NPC output, so that characters do not reveal information they should not know.
-80. As a system maintainer, I want the controller to check role consistency, so that character agents do not violate their role cards.
-81. As a system maintainer, I want random decisions to be logged, so that outcomes can be audited.
-82. As a system maintainer, I want random outcomes to be binding, so that character agents cannot silently override them.
-83. As a system maintainer, I want the controller to pass determined outcomes into character performance, so that agents perform the result instead of choosing it.
-84. As a system maintainer, I want the system to distinguish hard facts, soft facts and rumors, so that uncertainty can be represented.
-85. As a system maintainer, I want hard facts to be stable once established, so that the world remains consistent.
-86. As a system maintainer, I want soft facts to support future development without immediately locking truth, so that stories remain flexible.
-87. As a system maintainer, I want rumors and misunderstandings to belong to specific actors, so that belief does not equal truth.
-88. As a system maintainer, I want NPCs to act from actor knowledge rather than god state, so that misinformation produces real consequences.
-89. As a system maintainer, I want generated NPCs to be created only when narratively needed, so that the cast does not grow uncontrollably.
-90. As a system maintainer, I want new characters to have importance levels, so that temporary, minor and core NPCs can be handled differently.
-91. As a player, I want the system not to protect me from bad outcomes, so that the simulation feels honest.
-92. As a player, I want negative outcomes to still have cause, so that the system does not feel unfair.
-93. As a player, I want my choices to affect probability and consequences, so that agency exists even though I do not control outcomes.
-94. As a player, I want role card settings to be the only explicit character setup I need, so that story creation stays lightweight.
-95. As a player, I want to start from a small scenario, so that the system can focus on depth rather than scale.
-96. As a player, I want themes to be unrestricted within the small-scene constraint, so that I can create different genres.
-97. As a player, I want the system to not handle huge worlds in MVP, so that the first version remains focused.
-98. As a system maintainer, I want MVP requirements to exclude author mode, so that the product does not split between player and GM workflows too early.
-99. As a system maintainer, I want MVP requirements to exclude large-scale town simulation, so that token and complexity cost remain controlled.
-100. As a system maintainer, I want the first version to validate the core loop, so that future complexity can be added safely.
+71. As a player, I want to see my committed turn history after page refresh, so that I can continue the story without losing context.
+72. As a player, I want each turn in history to show what I input and what the protagonist saw, so that I can review what happened.
+73. As a system maintainer, I want turn history to be append-only, so that past turns cannot be retroactively modified.
+74. As a system maintainer, I want the agent runner to read turn history for context but not modify it, so that history remains a stable record.
+75. As a player, I want interruptions and silence to be possible, so that group dynamics feel organic.
+76. As a player, I want the system to decide who has speaking priority in a scene, so that group conversations do not become mechanical turn-taking.
+77. As a player, I want the selected NPC’s own agent to generate the actual words, so that speech stays character-specific.
+78. As a player, I want the system to avoid exposing hidden thoughts in the visible narration, so that private intent remains private.
+79. As a player, I want visible narration to include observable behavior and atmosphere, so that scenes are readable without leaking truth.
+80. As a player, I want the protagonist view to be novel-like but limited, so that I get rich description without omniscience.
+81. As a player, I want hidden NPC thoughts to affect future behavior, so that inner states matter even when I cannot see them.
+82. As a system maintainer, I want NPC output to separate visible dialogue, visible action, private memory changes and hidden intent, so that visibility filtering is reliable.
+83. As a system maintainer, I want the controller to validate NPC output, so that characters do not reveal information they should not know.
+84. As a system maintainer, I want the controller to check role consistency, so that character agents do not violate their role cards.
+85. As a system maintainer, I want random decisions to be logged, so that outcomes can be audited.
+86. As a system maintainer, I want random outcomes to be binding, so that character agents cannot silently override them.
+87. As a system maintainer, I want the controller to pass determined outcomes into character performance, so that agents perform the result instead of choosing it.
+88. As a system maintainer, I want the system to distinguish hard facts, soft facts and rumors, so that uncertainty can be represented.
+89. As a system maintainer, I want hard facts to be stable once established, so that the world remains consistent.
+90. As a system maintainer, I want soft facts to support future development without immediately locking truth, so that stories remain flexible.
+91. As a system maintainer, I want rumors and misunderstandings to belong to specific actors, so that belief does not equal truth.
+92. As a system maintainer, I want NPCs to act from actor knowledge rather than god state, so that misinformation produces real consequences.
+93. As a system maintainer, I want generated NPCs to be created only when narratively needed, so that the cast does not grow uncontrollably.
+94. As a system maintainer, I want new characters to have importance levels, so that temporary, minor and core NPCs can be handled differently.
+95. As a player, I want the system not to protect me from bad outcomes, so that the simulation feels honest.
+96. As a player, I want negative outcomes to still have cause, so that the system does not feel unfair.
+97. As a player, I want my choices to affect probability and consequences, so that agency exists even though I do not control outcomes.
+98. As a player, I want role card settings to be the only explicit character setup I need, so that story creation stays lightweight.
+99. As a player, I want to start from a small scenario, so that the system can focus on depth rather than scale.
+100. As a player, I want themes to be unrestricted within the small-scene constraint, so that I can create different genres.
+101. As a player, I want the system to not handle huge worlds in MVP, so that the first version remains focused.
+102. As a system maintainer, I want MVP requirements to exclude author mode, so that the product does not split between player and GM workflows too early.
+103. As a system maintainer, I want MVP requirements to exclude large-scale town simulation, so that token and complexity cost remain controlled.
+104. As a system maintainer, I want the first version to validate the core loop, so that future complexity can be added safely.
 
 ## Implementation Decisions
 
@@ -431,6 +436,19 @@ Expected coverage:
 - Player reasoning is stored as hypotheses.
 - Public facts are available as public knowledge.
 - No hidden God State fact is inserted into player knowledge without discovery.
+
+1. Player-visible Turn History Seam
+
+Test committed turn history persistence and retrieval.
+
+Expected coverage:
+
+- Each committed turn is appended to `turns/history.jsonl`.
+- History entry contains turnId, timestamp, player input and protagonist-visible output.
+- Page refresh can retrieve and display full history.
+- Claude Code Runner cold-start can read history for context.
+- Claude Code Runner cannot modify history file.
+- History append failure causes turn failure and rollback.
 
 1. NPC Memory and Actor Model Seam
 

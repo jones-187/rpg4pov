@@ -70,6 +70,18 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent
 回合开始前由 Orchestrator 创建的整个 Story Workspace 目录副本，用于失败回滚。**不是 Story Workspace 的一部分，不是故事状态**——是瞬态恢复机制，存活期不超过一次回合。存放在 Story Workspace 目录之外（`{WORKSPACE_ROOT}/.snapshots/{storyId}/`），每故事单份、回合前覆盖。
 _Avoid_: 版本历史、备份、checkpoint
 
+### Turn History（回合历史）
+已提交的玩家可见回合历史，存储在 `turns/history.jsonl`。每条记录包含 turnId、at、input、output。只由 TurnOrchestrator 在成功回合提交阶段追加。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
+_Avoid_: 完整世界状态、God State 日志、版本历史、checkpoint
+
+### History Entry（历史条目）
+Turn History 中的单条记录。包含：
+- turnId: 唯一标识符（UUID）
+- at: ISO 时间戳
+- input: 玩家输入（主角行动/台词）
+- output: 主角可见输出
+_Avoid_: runner 日志、诊断记录
+
 ## 架构边界
 
 ### 文件访问边界（Issue 3 起确立）
@@ -88,8 +100,17 @@ _Avoid_: 版本历史、备份、checkpoint
 - 失败并回滚的 **Story Turn** 不保留本回合产生的 **Random Log**；只有成功回合的随机判定成为故事状态的一部分。
 - **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数。两者产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
 - **Runner 切换** 决定 **Turn Orchestrator** 持有哪个 **Agent Runner** 实例，但 **Turn Orchestrator** 的生命周期编排逻辑（锁、快照、磁盘权威、回滚）不随 runner 变化。
+- 一个成功提交的 **Story Turn** 产生一条 **History Entry**，追加到 **Turn History**。
+- 失败/回滚的 **Story Turn** 不产生 **History Entry**。
+- **Turn History** 是玩家视角的故事记录，不包含 God State、NPC 私有记忆或内部日志。
+- **Claude Code Runner** 读取 **Turn History** 作为玩家已见/已说的上下文，但不得修改或删除 **Turn History**。
 
 ## 示例对话
 
 > **Dev:** "主角撬锁失败是 agent 写得戏剧化一点，还是系统先判定？"
 > **Domain expert:** "这是一次 **Random Judgment**。先用 **Roll Choice** 得到 **Binding Random Outcome**，agent 只能表演这个结果，不能重新选择成功或失败。"
+
+> **Dev:** "玩家刷新页面后看不到之前的回合输出，怎么办？"
+> **Domain expert:** "这需要 **Turn History**。成功回合的 **History Entry** 追加到 `turns/history.jsonl`，前端加载时读取并展示完整历史。"
+> **Dev:** "那 runner 可以改这个文件吗？"
+> **Domain expert:** "不可以。**Turn History** 只由 **Turn Orchestrator** 追加，runner 只读不改。它是玩家视角的记录，不是 runner 的草稿。"
