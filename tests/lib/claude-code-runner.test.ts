@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { ClaudeCodeRunner } from "@/lib/claude-code-runner";
-import type { SpawnFn, SpawnResult } from "@/lib/claude-code-runner";
+import type { SpawnFn, SpawnOpts, SpawnResult } from "@/lib/claude-code-runner";
 import { createStory, resolveWorkspaceDir, resolveWorkspaceRoot } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
@@ -14,8 +14,9 @@ beforeEach(async () => {
 afterEach(() => resetWorkspaceRoot());
 
 /** 构造 mock spawnFn，记录调用参数并返回预设结果 */
-function makeMockSpawn(result: SpawnResult): { spawn: SpawnFn; calls: Array<Record<string, unknown>> } {
-  const calls: Array<Record<string, unknown>> = [];
+type CallRecord = { cmd: string; args: string[]; opts: SpawnOpts };
+function makeMockSpawn(result: SpawnResult): { spawn: SpawnFn; calls: CallRecord[] } {
+  const calls: CallRecord[] = [];
   const spawn: SpawnFn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     return Promise.resolve(result);
@@ -163,7 +164,7 @@ describe("ClaudeCodeRunner", () => {
           },
         };
         // 把 fakeChild 经 opts._child 暴露（测试 hack；真实 spawn 返回 ChildProcess）
-        (opts as Record<string, unknown>)._child = fakeChild;
+        opts._child = fakeChild;
         // 立即 abort
         opts.signal?.addEventListener("abort", () => {
           resolve({ code: null, stdout: "", stderr: "", aborted: true });
