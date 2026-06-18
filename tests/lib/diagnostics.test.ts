@@ -20,6 +20,19 @@ describe("diagnostics", () => {
     expect(result).not.toContain("sk-ant-2");
   });
 
+  it("redactSecrets 脱敏 ANTHROPIC_AUTH_TOKEN（第三方 API 兼容）", () => {
+    const input = "error: ANTHROPIC_AUTH_TOKEN=sk-9l5lpWha40xJ7kYWzrxFOIaNYtotHvaxLXduDTvaGSLsbvgk call failed";
+    expect(redactSecrets(input)).toBe("error: ANTHROPIC_AUTH_TOKEN=[REDACTED] call failed");
+  });
+
+  it("redactSecrets 同时脱敏 ANTHROPIC_API_KEY 和 ANTHROPIC_AUTH_TOKEN", () => {
+    const input = "ANTHROPIC_API_KEY=sk-ant-1 and ANTHROPIC_AUTH_TOKEN=sk-custom-2";
+    const result = redactSecrets(input);
+    expect(result).toBe("ANTHROPIC_API_KEY=[REDACTED] and ANTHROPIC_AUTH_TOKEN=[REDACTED]");
+    expect(result).not.toContain("sk-ant-1");
+    expect(result).not.toContain("sk-custom-2");
+  });
+
   it("redactSecrets 大小写不敏感且保留原始 key 大小写（验证 i 标志 + 捕获组）", () => {
     expect(redactSecrets("anthropic_api_key=sk-ant-1")).toBe("anthropic_api_key=[REDACTED]");
     expect(redactSecrets("Anthropic_Api_Key=sk-ant-2")).toBe("Anthropic_Api_Key=[REDACTED]");

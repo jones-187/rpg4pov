@@ -18,8 +18,10 @@ async function main() {
   const cwd = process.cwd();
 
   if (mode === "timeout") {
-    // 不退出，等 abort
-    await new Promise(() => {});
+    // 不退出，等 abort（用 setInterval 保持 event loop 活跃）
+    await new Promise(() => {
+      setInterval(() => {}, 1000);
+    });
     return;
   }
 

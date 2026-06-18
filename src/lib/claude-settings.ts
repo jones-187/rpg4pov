@@ -43,7 +43,7 @@ export const CLAUDE_SETTINGS_JSON = JSON.stringify(
         "Write(./player.md)",
         "Write(./actors/**)",
         "Write(./logs/**)",
-        "Bash(node /app/cli/roll-choice.js:*)",
+        "Bash(node /app/dist/cli/roll-choice.js:*)",
       ],
     },
   },

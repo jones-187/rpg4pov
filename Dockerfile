@@ -27,13 +27,14 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV WORKSPACE_ROOT=/app/data/workspaces
 ENV USE_BUILTIN_RIPGREP=0
+ENV SHELL=/bin/bash
 
-# alpine musl 适配：装 ripgrep（claude bundled ripgrep 是 glibc 编译）
-RUN apk add --no-cache ripgrep
+# alpine musl 适配：装 ripgrep（claude bundled ripgrep 是 glibc 编译）+ bash
+RUN apk add --no-cache ripgrep bash
 
-# 装 claude code CLI（npm 固定版本，拉取 native binary 经 per-platform optional dependency）
-# 版本固定保证可重复构建；HITL 验收记录 claude --version 实际版本
-RUN npm install -g @anthropic-ai/claude-code@1.0.0
+# 装 claude code CLI（固定版本，避免自动升级导致不兼容）
+# v1.0.0 不支持 --bare/--settings/精细路径 allowedTools，v2+ 支持更完善的权限管控
+RUN npm install -g @anthropic-ai/claude-code@2.1.181
 
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs \
@@ -70,7 +71,7 @@ COPY --chown=nextjs:nodejs <<'SETTINGS' /app/claude/settings.json
       "Write(./player.md)",
       "Write(./actors/**)",
       "Write(./logs/**)",
-      "Bash(node /app/cli/roll-choice.js:*)"
+      "Bash(node /app/dist/cli/roll-choice.js:*)"
     ]
   }
 }
