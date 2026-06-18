@@ -3,14 +3,28 @@
 # ---- deps ----
 FROM node:20-alpine AS deps
 WORKDIR /app
+
+# 使用阿里云 Alpine 镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 RUN corepack enable
+# 使用淘宝 npm 镜像源
+RUN pnpm config set registry https://registry.npmmirror.com
+
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ---- builder ----
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# 使用阿里云 Alpine 镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 RUN corepack enable
+# 使用淘宝 npm 镜像源
+RUN pnpm config set registry https://registry.npmmirror.com
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -21,9 +35,13 @@ RUN pnpm build:cli
 # ---- runner ----
 FROM node:20-alpine AS runner
 WORKDIR /app
+
+# 使用阿里云 Alpine 镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
+ENV PORT=3002
 ENV HOSTNAME=0.0.0.0
 ENV WORKSPACE_ROOT=/app/data/workspaces
 ENV USE_BUILTIN_RIPGREP=0
@@ -34,7 +52,9 @@ RUN apk add --no-cache ripgrep bash
 
 # 装 claude code CLI（固定版本，避免自动升级导致不兼容）
 # v1.0.0 不支持 --bare/--settings/精细路径 allowedTools，v2+ 支持更完善的权限管控
-RUN npm install -g @anthropic-ai/claude-code@2.1.181
+# 使用淘宝 npm 镜像源
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm install -g @anthropic-ai/claude-code@2.1.181
 
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs \
@@ -87,5 +107,5 @@ COPY --from=builder --chown=nextjs:nodejs /app/dist/cli /app/cli
 COPY --from=builder --chown=nextjs:nodejs /app/dist/lib /app/lib
 
 USER nextjs
-EXPOSE 3000
+EXPOSE 3002
 CMD ["node", "server.js"]
