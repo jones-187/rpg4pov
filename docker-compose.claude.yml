@@ -10,4 +10,4 @@ services:
     environment:
       # 固定配置（不从 .env 读取）
       - AGENT_RUNNER=claude
-      - TURN_TIMEOUT_MS=180000
+      - TURN_TIMEOUT_MS=300000
