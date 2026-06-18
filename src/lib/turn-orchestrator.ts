@@ -15,6 +15,8 @@ import {
   readWorkspaceUnsafeMarker,
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
+import { appendTurnHistory, type TurnHistoryEntry } from "./turn-history";
+import crypto from "node:crypto";
 
 /** 默认回合超时 60s（Issue 4）。可经 TURN_TIMEOUT_MS 覆盖。 */
 function resolveTurnTimeoutMs(): number {
@@ -31,6 +33,7 @@ export interface TurnOutcome {
   success: boolean;
   playerResponse: string | null;
   error?: string;
+  turn?: TurnHistoryEntry; // Issue 6.5: 成功时返回 committed entry
 }
 
 /**
@@ -115,9 +118,29 @@ export class TurnOrchestrator {
       return await this.failTurn(storyId, "output missing or empty", playerInput);
     }
 
-    // 9. 成功：删除本次快照，返回从文件读取的主角可见输出
+    // 9. 成功：append history → 删除快照 → 返回 committed entry
+    const turnId = crypto.randomUUID();
+    const at = new Date().toISOString();
+    const entry: TurnHistoryEntry = {
+      turnId,
+      at,
+      input: playerInput,
+      output: playerResponse,
+    };
+
+    try {
+      await appendTurnHistory(storyId, entry);
+    } catch (appendErr) {
+      // history append 失败视为本回合失败
+      return await this.failTurn(
+        storyId,
+        `history append failed: ${appendErr instanceof Error ? appendErr.message : String(appendErr)}`,
+        playerInput,
+      );
+    }
+
     await deleteSnapshot(storyId);
-    return { success: true, playerResponse };
+    return { success: true, playerResponse, turn: entry };
   }
 
   /**
