@@ -2,10 +2,10 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。
 
-当前仓库状态：**Issue 6 — 接入 Claude Code CLI Runner**。
+当前仓库状态：**Issue 6.5 — Player-visible Turn History**。
 首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出。
 已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam。
-**Issue 6.5（Player-visible Turn History）** 已规划，待实现。
+已保存并展示玩家可见的回合历史（`turns/history.jsonl`）。
 
 ## 本地开发
 
