@@ -118,6 +118,11 @@ agent 不自己假装随机
 **Type**: AFK
 **Blocked by**: Issue 6
 **User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63, 76-81
+**Status**: 实现 + 测试完成
+- ✅ 代码实现完成（7 个提交对应 plan 的 7 个 Task）
+- ✅ 单元测试全绿：turn-history（9）/ workspace（24，含 history.jsonl 初始化）/ orchestrator（17，含 history append/rollback）/ API（14）/ frontend（验证 turn 结构）
+- ✅ TypeScript 类型检查通过
+- ✅ Claude prompt 明确读取 `turns/history.jsonl` 并禁止修改
 
 **目标行为**：系统保存玩家可见的回合历史到 `turns/history.jsonl`。刷新页面后能展示完整已提交历史。Claude Code Runner 冷启动时读取历史作为玩家已见/已说的上下文，但不修改历史文件。
 
