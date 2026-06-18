@@ -105,6 +105,7 @@ export class TurnOrchestrator {
         storyId,
         result.error ?? "done marker missing",
         playerInput,
+        result.detail,
       );
     }
 
@@ -130,6 +131,7 @@ export class TurnOrchestrator {
     storyId: string,
     reason: string,
     playerInput: string,
+    detail?: string,
   ): Promise<TurnOutcome> {
     // restoreSnapshot 单独 try/catch——它不是 best-effort，失败需要诊断
     try {
@@ -145,7 +147,7 @@ export class TurnOrchestrator {
 
     // restore 成功：best-effort 写错误日志 + 删除快照
     try {
-      await appendTurnError(storyId, { reason, input: playerInput });
+      await appendTurnError(storyId, { reason, input: playerInput, detail });
       await deleteSnapshot(storyId);
     } catch {
       // appendTurnError / deleteSnapshot 是 best-effort，不影响用户响应

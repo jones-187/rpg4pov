@@ -7,7 +7,6 @@ import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
 import { buildPrompt } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
-import { appendTurnError } from "./turn-error-log";
 
 /** spawn 函数签名（用于依赖注入测试） */
 export type SpawnFn = (
@@ -67,7 +66,7 @@ const SIGKILL_GRACE_MS = 5_000;
 
 /**
  * Claude Code Runner（Issue 6）。
- * 冷启动 `claude --bare -p` 子进程执行回合。
+ * 冷启动 `claude -p` 子进程执行回合。
  *
  * **职责分层**：
  * - runTurn：signal→kill 策略（abort 时 SIGTERM，宽限后 SIGKILL），失败诊断写日志
@@ -143,14 +142,15 @@ export class ClaudeCodeRunner implements AgentRunner {
       }
 
       if (result.code !== 0) {
-        // 失败：写脱敏+限长诊断到 logs/turn-errors.log
-        const diag = `claude exit=${result.code}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
-        await appendTurnError(req.storyId, {
-          reason: "claude non-zero exit",
-          input: req.playerInput,
-          detail: sanitizeForLog(diag),
-        });
-        return { success: false, error: `claude exit code ${result.code}` };
+        const signalInfo = result.code === null ? " (killed by signal)" : "";
+        return {
+          success: false,
+          error: `claude exit code ${result.code}${signalInfo}`,
+          // 诊断信息通过 detail 返回，由 Orchestrator 在 restoreSnapshot 之后写入日志
+          detail: sanitizeForLog(
+            `claude exit=${result.code}${signalInfo}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+          ),
+        };
       }
 
       // 成功：不写 stdout/stderr，权威交给磁盘 done.json（Orchestrator 检查）
@@ -158,17 +158,11 @@ export class ClaudeCodeRunner implements AgentRunner {
     } catch (err) {
       const reason =
         err instanceof Error && err.name === "AbortError" ? "aborted" : "runner crashed";
-      // 失败诊断（best-effort）
-      try {
-        await appendTurnError(req.storyId, {
-          reason,
-          input: req.playerInput,
-          detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
-        });
-      } catch {
-        // best-effort
-      }
-      return { success: false, error: reason };
+      return {
+        success: false,
+        error: reason,
+        detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
+      };
     } finally {
       req.signal.removeEventListener("abort", onAbort);
       // 清理 SIGKILL escalate timer，避免 event loop 延迟 5s 退出

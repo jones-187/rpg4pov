@@ -1,18 +1,19 @@
 # 启用真实 Claude Code Runner 的 compose 覆盖文件。
-# 用法：docker-compose -f docker-compose.yml -f docker-compose.claude.yml up
+# 用法：docker compose -f docker-compose.yml -f docker-compose.claude.yml up
 # 支持官方 API（ANTHROPIC_API_KEY）和第三方 API（ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL）。
+# 未设置的变量不会传入容器（claude CLI 会报明确的 missing key 错误）。
 services:
   rpg4pov:
     environment:
       - AGENT_RUNNER=claude
-      # Anthropic 官方 API
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Anthropic 官方 API（不设置则不传入）
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       # 第三方 API 兼容（如 OpenRouter、Azure、自建代理）
-      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
-      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
-      - ANTHROPIC_DEFAULT_HAIKU_MODEL=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}
-      - ANTHROPIC_DEFAULT_OPUS_MODEL=${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
-      - ANTHROPIC_DEFAULT_SONNET_MODEL=${ANTHROPIC_DEFAULT_SONNET_MODEL:-}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
+      - ANTHROPIC_DEFAULT_HAIKU_MODEL=${ANTHROPIC_DEFAULT_HAIKU_MODEL}
+      - ANTHROPIC_DEFAULT_OPUS_MODEL=${ANTHROPIC_DEFAULT_OPUS_MODEL}
+      - ANTHROPIC_DEFAULT_SONNET_MODEL=${ANTHROPIC_DEFAULT_SONNET_MODEL}
       # 回合超时（默认 180s）
       - TURN_TIMEOUT_MS=180000

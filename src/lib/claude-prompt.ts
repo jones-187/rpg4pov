@@ -1,7 +1,7 @@
 /**
  * 首版 agent prompt（Issue 6）。
  * 放代码常量便于版本管理与 runner 引用；后续可迁移到 prompts/story-turn-runner.md。
- * runner 把填充后的完整 prompt 经临时文件传给 claude --bare -p，不放 argv。
+ * runner 把填充后的完整 prompt 经临时文件传给 claude -p，不放 argv。
  */
 
 export const STORY_TURN_RUNNER_PROMPT_TEMPLATE = `你是故事模拟引擎的回合执行 agent。当前工作目录是 Story Workspace。
