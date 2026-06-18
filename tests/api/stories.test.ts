@@ -63,8 +63,9 @@ describe("GET /api/stories/{id}", () => {
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.storyId).toBe(meta.storyId);
-    expect(json.title).toBe("查询");
+    expect(json.story.storyId).toBe(meta.storyId);
+    expect(json.story.title).toBe("查询");
+    expect(json.history).toEqual([]);
   });
 
   it("returns 404 for unknown valid-format id", async () => {
