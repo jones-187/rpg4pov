@@ -6,13 +6,15 @@
 
 const DEFAULT_LOG_LIMIT = 16_384; // 16KB
 
-/** 把 ANTHROPIC_API_KEY 值替换为 [REDACTED]，处理 =/:/空格 分隔形式 */
+/** 把敏感凭证值替换为 [REDACTED]，处理 =/:/空格 分隔形式 */
 export function redactSecrets(text: string): string {
-  // 匹配 ANTHROPIC_API_KEY 后跟分隔符（=、:、空白其一或多个）和值（值到下一个空白或行尾）
+  // 匹配敏感 key 后跟分隔符（=、:、空白其一或多个）和值（值到下一个空白或行尾）
   // 使用捕获组 $1 保留原始 key 大小写（小写/混合形式不被强制大写化）
   // 注：空白分隔会误吞后续 token（如 "KEY is set" → "KEY=[REDACTED]"），
   // 但脱敏场景下过度脱敏优于漏脱敏，故接受该副作用。
-  return text.replace(/(ANTHROPIC_API_KEY)[\s:=]+\S+/gi, "$1=[REDACTED]");
+  return text
+    .replace(/(ANTHROPIC_API_KEY)[\s:=]+\S+/gi, "$1=[REDACTED]")
+    .replace(/(ANTHROPIC_AUTH_TOKEN)[\s:=]+\S+/gi, "$1=[REDACTED]");
 }
 
 /** 超过限长截断并标注 truncated */

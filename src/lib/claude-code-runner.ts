@@ -34,7 +34,16 @@ export interface SpawnResult {
 
 /** 从 process.env 传递的白名单 key（禁止全量继承 process.env） */
 const ENV_WHITELIST = [
+  // Anthropic 官方 API
   "ANTHROPIC_API_KEY",
+  // 第三方 API 兼容（如 OpenRouter、Azure、自建代理）
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  // 系统环境
   "PATH",
   "HOME",
   "NODE_ENV",
@@ -48,6 +57,7 @@ const ENV_WHITELIST = [
  */
 const RUNNER_FIXED_ENV: Record<string, string> = {
   USE_BUILTIN_RIPGREP: "0",
+  SHELL: "/bin/bash", // claude CLI v2 需要 POSIX shell
 };
 
 const DEFAULT_CLAUDE_PATH = "claude";
@@ -108,16 +118,23 @@ export class ClaudeCodeRunner implements AgentRunner {
 
     try {
       req.signal.throwIfAborted();
-      // writeTempPrompt 在 try 内，失败（磁盘满/权限不足）走 catch 块返回结构化结果 + 诊断日志
+      // prompt 经临时文件传递，然后作为 claude CLI 的位置参数传入
+      // Claude CLI v2 -p 支持：stdin 管道或位置参数
       const promptFilePath = await writeTempPrompt(prompt);
       promptFile = promptFilePath;
 
       const args = [
-        "--bare",
-        "-p",
+        "-p", // 非交互模式
+        "--output-format",
+        "json",
+        // 权限通过 --settings + --permission-mode auto 控制：
+        // - settings.json 定义 permissions.allow/deny 规则（路径级精细控制）
+        // - --permission-mode auto 使 settings 中的 allow 规则自动放行，无需人工确认
+        "--permission-mode",
+        "auto",
         "--settings",
         CLAUDE_SETTINGS_PATH,
-        promptFilePath,
+        promptFilePath, // prompt 作为位置参数
       ];
       const result = await this.spawnFn(this.claudePath, args, spawnOpts);
 
@@ -207,7 +224,11 @@ async function safeUnlink(file: string): Promise<void> {
  * 默认 spawn 实现：真实 child_process.spawn + 收集 stdout/stderr + 挂 _child。
  * 不负责 kill（kill 策略由 runTurn 经 opts._child 执行）。
  */
-export function defaultSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<SpawnResult> {
+export function defaultSpawn(
+  cmd: string,
+  args: string[],
+  opts: SpawnOpts,
+): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     const child = realSpawn(cmd, args, {
       cwd: opts.cwd,

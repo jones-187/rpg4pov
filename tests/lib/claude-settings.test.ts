@@ -22,7 +22,7 @@ describe("claude-settings", () => {
   it("settings allow Bash 仅一条规则且精确匹配 roll-choice 调用", () => {
     const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
     const bashRules = (parsed.permissions.allow as string[]).filter((r) => r.startsWith("Bash("));
-    expect(bashRules).toEqual(["Bash(node /app/cli/roll-choice.js:*)"]);
+    expect(bashRules).toEqual(["Bash(node /app/dist/cli/roll-choice.js:*)"]);
   });
 
   it("settings allow 含 Read/Write workspace 文件", () => {

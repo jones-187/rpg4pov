@@ -100,8 +100,12 @@ describe("ClaudeCodeRunner integration (fake-claude)", () => {
     const meta = await createStory({ title: "integration timeout" });
     const wsDir = resolveWorkspaceDir(meta.storyId);
 
-    const wrappedSpawn: SpawnFn = (cmd, args, opts) =>
-      defaultSpawn("node", [FAKE_CLAUDE, ...args], { ...opts, env: { ...opts.env, FAKE_CLAUDE_MODE: "timeout" } } as SpawnOpts);
+    const wrappedSpawn: SpawnFn = (cmd, args, opts) => {
+      // Mutate opts.env in-place so _child is set on the original opts object
+      // that runTurn's abort handler reads
+      opts.env = { ...opts.env, FAKE_CLAUDE_MODE: "timeout" };
+      return defaultSpawn("node", [FAKE_CLAUDE, ...args], opts);
+    };
 
     const runner = new ClaudeCodeRunner({ spawnFn: wrappedSpawn });
     const ctrl = new AbortController();
