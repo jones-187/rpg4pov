@@ -17,7 +17,7 @@ beforeAll(async () => {
 afterAll(() => resetWorkspaceRoot());
 
 describe("ClaudeCodeRunner integration (fake-claude)", () => {
-  it("success mode: fake-claude writes output.md + done.json, runner returns {success:true}", async () => {
+  it("success mode: fake-claude reads stdin prompt, writes output.md + done.json, runner returns {success:true}", async () => {
     const meta = await createStory({ title: "integration success" });
     const wsDir = resolveWorkspaceDir(meta.storyId);
 
@@ -79,7 +79,7 @@ describe("ClaudeCodeRunner integration (fake-claude)", () => {
       signal: AbortSignal.timeout(5000),
     });
 
-    // Runner only checks exit code; missing output is Orchestrator’s concern
+    // Runner only checks exit code; missing output is Orchestrator's concern
     expect(result.success).toBe(true);
 
     // done.json exists
@@ -118,5 +118,53 @@ describe("ClaudeCodeRunner integration (fake-claude)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("aborted");
+  });
+
+  it("assert-stdin mode: fake-claude verifies stdin contains playerInput, workspace directives, and history.jsonl directive", async () => {
+    const meta = await createStory({ title: "integration assert-stdin" });
+    const wsDir = resolveWorkspaceDir(meta.storyId);
+
+    const wrappedSpawn: SpawnFn = (cmd, args, opts) =>
+      defaultSpawn("node", [FAKE_CLAUDE, ...args], { ...opts, env: { ...opts.env, FAKE_CLAUDE_MODE: "assert-stdin" } } as SpawnOpts);
+
+    const runner = new ClaudeCodeRunner({ spawnFn: wrappedSpawn });
+    const result = await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: wsDir,
+      playerInput: "推开木门",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    // assert-stdin 模式：stdin 包含完整 prompt，fake-claude 写 output + done，返回成功
+    expect(result.success).toBe(true);
+
+    const outputMd = await fs.readFile(path.join(wsDir, "turn", "output.md"), "utf8");
+    expect(outputMd).toContain("主角视窗");
+
+    const doneJson = JSON.parse(
+      await fs.readFile(path.join(wsDir, "turn", "done.json"), "utf8"),
+    );
+    expect(doneJson.status).toBe("success");
+  });
+
+  it("stderr does not contain 'no stdin data received' warning", async () => {
+    const meta = await createStory({ title: "integration no-stdin-warning" });
+    const wsDir = resolveWorkspaceDir(meta.storyId);
+
+    const wrappedSpawn: SpawnFn = (cmd, args, opts) =>
+      defaultSpawn("node", [FAKE_CLAUDE, ...args], opts as SpawnOpts);
+
+    const runner = new ClaudeCodeRunner({ spawnFn: wrappedSpawn });
+    const result = await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: wsDir,
+      playerInput: "推开木门",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    expect(result.success).toBe(true);
+    // fake-claude 不会产生 "no stdin data received" 警告
+    // 真实 claude CLI 也不应出现，因为 stdin 被立即写入并关闭
+    expect(result.detail).toBeUndefined();
   });
 });

@@ -178,7 +178,7 @@ describe("TurnOrchestrator", () => {
 
   it("timeout: hanging runner is aborted, turn fails with timeout reason", async () => {
     const meta = await createStory();
-    // 用极短超时，避免测试等待 60s
+    // 用极短超时，避免测试等待
     const prev = process.env.TURN_TIMEOUT_MS;
     process.env.TURN_TIMEOUT_MS = "200";
     try {
@@ -186,6 +186,32 @@ describe("TurnOrchestrator", () => {
       const outcome = await orchestrator.executeTurn(meta.storyId, "等待");
       expect(outcome.success).toBe(false);
       expect(outcome.error).toBe("timeout");
+    } finally {
+      if (prev === undefined) delete process.env.TURN_TIMEOUT_MS;
+      else process.env.TURN_TIMEOUT_MS = prev;
+    }
+  });
+
+  it("timeout: error log records reason='timeout' with durationMs detail", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+    const logsDir = path.join(wsDir, "logs");
+    const prev = process.env.TURN_TIMEOUT_MS;
+    process.env.TURN_TIMEOUT_MS = "200";
+    try {
+      const orchestrator = new TurnOrchestrator(new HangingRunner());
+      const outcome = await orchestrator.executeTurn(meta.storyId, "等待超时");
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBe("timeout");
+
+      // 验证 turn-errors.log 记录了 timeout 原因和 duration 信息
+      const logPath = path.join(logsDir, "turn-errors.log");
+      const logRaw = await fs.readFile(logPath, "utf8");
+      const entry = JSON.parse(logRaw.trim());
+      expect(entry.reason).toBe("timeout");
+      expect(entry.detail).toContain("timeout after");
+      expect(entry.detail).toContain("ms");
+      expect(entry.input).toBe("等待超时");
     } finally {
       if (prev === undefined) delete process.env.TURN_TIMEOUT_MS;
       else process.env.TURN_TIMEOUT_MS = prev;

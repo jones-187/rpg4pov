@@ -73,7 +73,7 @@ describe("ClaudeCodeRunner", () => {
     }
   });
 
-  it("prompt 经临时文件作为位置参数传递，argv 不含完整 prompt 文本", async () => {
+  it("prompt 经 stdin 传递（opts.stdinData），argv 不含完整 prompt 文本，也不含 prompt 文件路径", async () => {
     const meta = await createStory();
     const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
     const runner = new ClaudeCodeRunner({ spawnFn: spawn });
@@ -83,36 +83,38 @@ describe("ClaudeCodeRunner", () => {
       playerInput: "推开木门",
       signal: AbortSignal.timeout(5000),
     });
+    // stdinData 包含完整 prompt（含 playerInput）
+    expect(calls[0].opts.stdinData).toContain("推开木门");
     // argv 不含完整 prompt 文本
     const args = calls[0].args as string[];
     expect(args.some((a) => a.includes("推开木门"))).toBe(false);
-    // 最后一个位置参数是 prompt 文件路径
-    const lastArg = args[args.length - 1];
-    expect(lastArg).toContain("claude-prompts");
+    // args 不含 prompt 文件路径（不再使用临时文件）
+    expect(args.some((a) => a.includes("claude-prompts"))).toBe(false);
     // args 含 --settings 和 --permission-mode
     expect(args).toContain("--settings");
     expect(args).toContain("--permission-mode");
     expect(args).toContain("auto");
   });
 
-  it("临时 prompt 文件用完删除", async () => {
+  it("stdinData 包含完整 prompt：playerInput、workspace 指令、history.jsonl 指令", async () => {
     const meta = await createStory();
-    const { spawn } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+    const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
     const runner = new ClaudeCodeRunner({ spawnFn: spawn });
     await runner.runTurn({
       storyId: meta.storyId,
       workspaceDir: resolveWorkspaceDir(meta.storyId),
-      playerInput: "推开木门",
+      playerInput: "走向酒馆",
       signal: AbortSignal.timeout(5000),
     });
-    // 临时文件应已删除（检查 /tmp/claude-prompts 目录下没有残留）
-    const tmpDir = path.join(os.tmpdir(), "claude-prompts");
-    try {
-      const files = await fs.readdir(tmpDir);
-      expect(files.length).toBe(0);
-    } catch {
-      // 目录不存在也算通过
-    }
+    const stdinData = calls[0].opts.stdinData;
+    // 完整 prompt 包含 playerInput
+    expect(stdinData).toContain("走向酒馆");
+    // 包含 workspace 读取指令
+    expect(stdinData).toContain("story.md");
+    expect(stdinData).toContain("world.md");
+    expect(stdinData).toContain("player.md");
+    // 包含 turns/history.jsonl 相关指令
+    expect(stdinData).toContain("done.json");
   });
 
   it("成功回合返回 {success:true}，不写 stdout/stderr 到日志", async () => {
