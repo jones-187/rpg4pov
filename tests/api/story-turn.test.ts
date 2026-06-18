@@ -124,3 +124,26 @@ describe("POST /api/story-turn (Issue 4 regression)", () => {
     expect(json.playerResponse).toContain("Issue 4 回归");
   });
 });
+
+describe("POST /api/story-turn (Issue 6.5: returns committed turn)", () => {
+  it("returns playerResponse and turn on success", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "推开木门" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.playerResponse).toContain("推开木门");
+    expect(json.turn).toBeDefined();
+    expect(json.turn.input).toBe("推开木门");
+    expect(json.turn.output).toBe(json.playerResponse);
+    expect(json.turn.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  it("does not return turn on failure", async () => {
+    // 创建一个已存在的故事，然后用无效输入触发失败
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "" })); // 空输入
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.turn).toBeUndefined();
+  });
+});
