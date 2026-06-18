@@ -113,6 +113,31 @@ agent 不自己假装随机
 
 ------
 
+### 6.5. 保存并展示 Player-visible Turn History
+
+**Type**: AFK
+**Blocked by**: Issue 6
+**User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63, 76-81
+
+**目标行为**：系统保存玩家可见的回合历史到 `turns/history.jsonl`。刷新页面后能展示完整已提交历史。Claude Code Runner 冷启动时读取历史作为玩家已见/已说的上下文，但不修改历史文件。
+
+这是 MVP 的基础体验：没有它，刷新页面后看不到前文；没有它，Claude Code 冷启动缺少主角已经看见/说过什么的上下文。
+
+**验收标准**：
+1. createStory 会创建 `turns/` 和 `turns/history.jsonl`。
+2. 成功回合后，TurnOrchestrator append 一条 history entry。
+3. history entry 包含 turnId / at / input / output。
+4. history append 失败会导致本回合失败并 rollback。
+5. 失败/timeout/rollback 回合不会留下 history entry。
+6. GET /api/stories/{storyId} 返回 story meta + history。
+7. 故事页刷新后能展示完整 committed history。
+8. POST /api/story-turn 成功返回 { playerResponse, turn }。
+9. 前端提交成功后 append 后端返回的 committed turn。
+10. Claude Runner prompt 明确读取 `turns/history.jsonl`。
+11. prompt 明确禁止 runner 修改 `turns/history.jsonl`。
+
+------
+
 ### 7. 用自然语言初始化故事 Workspace
 
 **Type**: AFK
@@ -162,6 +187,7 @@ Issue 3
 Issue 4
 Issue 5
 Issue 6
+Issue 6.5
 Issue 7
 Issue 8
 Issue 9
@@ -180,9 +206,12 @@ Issue 9
    ↓          ↘
 6. Claude Runner   5. 随机工具
    ↓              ↘
+6.5. Player-visible Turn History
+   ↓                ↘
 7. 故事初始化       ↘
    ↓                ↘
 8. 最小真实可玩链路
 ```
 
 `9. 输出隔离强化` 依赖 Issue 4，可以在 Issue 6 前后做。
+`6.5. Player-visible Turn History` 依赖 Issue 6，必须在 Issue 7 之前（初始化 agent 也需要读取历史）。
