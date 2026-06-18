@@ -17,6 +17,25 @@ interface TurnHistoryEntry {
   output: string;
 }
 
+/**
+ * 规范化 output 内容：
+ * 如果以 `# 主角视窗` 开头，去掉这一行和紧随其后的空行。
+ * UI 标题已负责展示"主角视窗"，避免重复。
+ */
+function normalizeOutput(output: string): string {
+  const lines = output.split("\n");
+  // 检查第一行是否是 `# 主角视窗`
+  if (lines[0]?.trim() === "# 主角视窗") {
+    // 去掉第一行
+    lines.shift();
+    // 如果下一行是空行，也去掉
+    if (lines[0]?.trim() === "") {
+      lines.shift();
+    }
+  }
+  return lines.join("\n");
+}
+
 export default function StoryPage() {
   const params = useParams<{ storyId: string }>();
   const storyId = params.storyId;
@@ -127,11 +146,13 @@ export default function StoryPage() {
         ) : (
           history.map((turn, idx) => (
             <div key={turn.turnId} className="turn-entry">
-              <div className="turn-input">
-                <strong>玩家输入：</strong>{turn.input}
+              <div className="turn-input-block">
+                <h3 className="turn-block-title">你</h3>
+                <div className="turn-input-content">{turn.input}</div>
               </div>
-              <div className="turn-output">
-                {turn.output}
+              <div className="turn-output-block">
+                <h3 className="turn-block-title">主角视窗</h3>
+                <div className="turn-output-content">{normalizeOutput(turn.output)}</div>
               </div>
             </div>
           ))
