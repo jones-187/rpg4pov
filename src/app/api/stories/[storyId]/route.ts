@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStory } from "@/lib/workspace";
+import { readTurnHistory } from "@/lib/turn-history";
 
 export async function GET(
   _request: Request,
@@ -10,5 +11,10 @@ export async function GET(
   if (!meta) {
     return NextResponse.json({ error: "story not found" }, { status: 404 });
   }
-  return NextResponse.json(meta);
+
+  const history = await readTurnHistory(storyId);
+  return NextResponse.json({
+    story: meta,
+    history: history ?? [],
+  });
 }
