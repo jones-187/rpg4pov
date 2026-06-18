@@ -207,7 +207,7 @@ async function safeUnlink(file: string): Promise<void> {
  * 默认 spawn 实现：真实 child_process.spawn + 收集 stdout/stderr + 挂 _child。
  * 不负责 kill（kill 策略由 runTurn 经 opts._child 执行）。
  */
-function defaultSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<SpawnResult> {
+export function defaultSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     const child = realSpawn(cmd, args, {
       cwd: opts.cwd,
