@@ -8,8 +8,8 @@ WORKDIR /app
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 RUN corepack enable
-# 使用淘宝 npm 镜像源
-RUN pnpm config set registry https://registry.npmmirror.com
+# 使用淘宝 npm 镜像源（通过环境变量，避免 pnpm 版本兼容问题）
+ENV npm_config_registry=https://registry.npmmirror.com
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -22,8 +22,8 @@ WORKDIR /app
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 RUN corepack enable
-# 使用淘宝 npm 镜像源
-RUN pnpm config set registry https://registry.npmmirror.com
+# 使用淘宝 npm 镜像源（通过环境变量，避免 pnpm 版本兼容问题）
+ENV npm_config_registry=https://registry.npmmirror.com
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
