@@ -138,7 +138,14 @@ export class ClaudeCodeRunner implements AgentRunner {
       const result = await this.spawnFn(this.claudePath, args, spawnOpts);
 
       if (result.aborted || req.signal.aborted) {
-        return { success: false, error: "aborted" };
+        return {
+          success: false,
+          error: "aborted",
+          detail: sanitizeForLog(
+            `aborted: signal=${req.signal.aborted}, result.aborted=${result.aborted}\n` +
+              `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+          ),
+        };
       }
 
       if (result.code !== 0) {

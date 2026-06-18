@@ -81,9 +81,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # 复制 CLI 工具到 /app/cli/（从 dist/ 编译产物复制，对 agent 隐藏 dist/ 编译细节）
-COPY --from=builder --chown=nextjs:nodejs /app/dist/cli ./cli
-# 复制 dist/lib（roll-choice.js 的 import 依赖链）
-COPY --from=builder --chown=nextjs:nodejs /app/dist/lib ./dist/lib
+# roll-choice.js require('../lib/random-tool')，所以 /app/lib/ 需存在
+# 必须在 standalone COPY 之后，否则被 standalone 层覆盖
+COPY --from=builder --chown=nextjs:nodejs /app/dist/cli /app/cli
+COPY --from=builder --chown=nextjs:nodejs /app/dist/lib /app/lib
 
 USER nextjs
 EXPOSE 3000
