@@ -2,9 +2,10 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。
 
-当前仓库状态：**Issue 5 — 工具真随机 roll-choice seam**。
-首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 返回固定主角可见输出。
-已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam；尚未接入初始化 agent 与真实 Claude Code agent runtime（属后续 issue）。
+当前仓库状态：**Issue 6 — 接入 Claude Code CLI Runner**。
+首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出。
+已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam。
+**Issue 6.5（Player-visible Turn History）** 已规划，待实现。
 
 ## 本地开发
 
@@ -43,15 +44,18 @@ docker compose up --build
 
 ```
 {WORKSPACE_ROOT}/{storyId}/
-  story.md         # id / title / createdAt（front matter）
-  rules.md         # 占位
-  world.md         # 占位
-  player.md        # 占位（主角）
-  actors/.gitkeep  # 占位（NPC 角色卡目录）
-  logs/.gitkeep    # 内部日志目录
+  story.md              # id / title / createdAt（front matter）
+  rules.md              # 占位
+  world.md              # 占位
+  player.md             # 占位（主角）
+  actors/.gitkeep       # 占位（NPC 角色卡目录）
+  logs/.gitkeep         # 内部日志目录
   logs/random-rolls.jsonl # 随机判定日志（成功回合追加；不对用户可见）
-  turn/input.md    # 本回合主角输入
-  turn/output.md   # 本回合固定主角可见输出（Web 唯一返回源）
+  logs/turn-errors.log  # 回合失败诊断日志（内部）
+  turn/input.md         # 本回合主角输入
+  turn/output.md        # 本回合固定主角可见输出（Web 唯一返回源）
+  turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5）
 ```
 
 主角可见输出只来自 `turn/output.md`；Web 不读取 agent stdout、logs、world、player、actors。
+玩家可见历史来自 `turns/history.jsonl`，是已提交的完整回合记录。
