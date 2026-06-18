@@ -16,7 +16,7 @@ pnpm install
 pnpm dev
 ```
 
-打开 http://localhost:3000
+打开 http://localhost:3002
 
 开发模式下 Story Workspace 落在 `./data/workspaces/{storyId}/`（由 `WORKSPACE_ROOT` 控制，默认 `./data/workspaces`）。
 
@@ -29,13 +29,37 @@ pnpm build      # 类型检查 + 生产构建
 
 ## Docker 运行（单容器，数据持久化）
 
+### 默认模式（Fake Agent，无需 API 配置）
+
 ```bash
 docker compose up --build
 ```
 
-打开 http://localhost:3000 ，创建故事并发送输入。
+使用 Fake Agent 返回固定输出，适合测试和开发。
 
-- 仅暴露 3000 端口；
+### Claude 模式（真实 AI 响应）
+
+1. 创建 `.env` 文件配置 API：
+
+```env
+# 第三方 API（如 OpenRouter、自建代理）
+ANTHROPIC_AUTH_TOKEN=your-token
+ANTHROPIC_BASE_URL=https://your-api-proxy
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+# 或官方 API
+ANTHROPIC_API_KEY=sk-ant-xxx
+```
+
+2. 使用 claude compose 覆盖文件启动：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
+```
+
+打开 http://localhost:3002 ，创建故事并发送输入。
+
+- 仅暴露 3002 端口；
 - 故事数据通过 named volume `rpg4pov-data` 挂到 `/app/data`，`compose down`（不带 `-v`）后重建容器数据不丢；
 - 镜像内不含源码、测试与文档，不内置任何凭证。
 
