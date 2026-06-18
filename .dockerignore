@@ -4,5 +4,7 @@ node_modules
 docs
 tests
 *.md
+.env
+.env.*
 .env*.local
 data

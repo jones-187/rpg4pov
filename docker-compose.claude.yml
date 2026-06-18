@@ -1,0 +1,9 @@
+# 启用真实 Claude Code Runner 的 compose 覆盖文件。
+# 用法：docker-compose -f docker-compose.yml -f docker-compose.claude.yml up
+# 需宿主 shell 设置 ANTHROPIC_API_KEY 环境变量。
+services:
+  rpg4pov:
+    environment:
+      - AGENT_RUNNER=claude
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TURN_TIMEOUT_MS=180000

@@ -1,13 +1,16 @@
 services:
   rpg4pov:
     build: .
-    image: rpg4pov:issue2
+    image: rpg4pov:issue6
     container_name: rpg4pov
     ports:
       - "3000:3000"
     volumes:
       - rpg4pov-data:/app/data
     restart: unless-stopped
+    # 默认 AGENT_RUNNER 不设（route.ts 默认 fake）。
+    # 启用真实 claude：用 docker-compose -f docker-compose.yml -f docker-compose.claude.yml up
+    # 或在此处 environment 加 AGENT_RUNNER=claude + ANTHROPIC_API_KEY。
 
 volumes:
   rpg4pov-data:
