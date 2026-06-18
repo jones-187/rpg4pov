@@ -60,6 +60,7 @@ export async function createStory(opts?: { title?: string }): Promise<StoryMeta>
   await fs.mkdir(path.join(dir, "actors"), { recursive: true });
   await fs.mkdir(path.join(dir, "logs"), { recursive: true });
   await fs.mkdir(path.join(dir, "turn"), { recursive: true });
+  await fs.mkdir(path.join(dir, "turns"), { recursive: true }); // Issue 6.5
 
   await fs.writeFile(path.join(dir, "story.md"), storyMd(storyId, title, createdAt));
   await fs.writeFile(path.join(dir, "rules.md"), RULES_MD);
@@ -69,6 +70,7 @@ export async function createStory(opts?: { title?: string }): Promise<StoryMeta>
   await fs.writeFile(path.join(dir, "logs", ".gitkeep"), "");
   await fs.writeFile(path.join(dir, "turn", "input.md"), TURN_INPUT_PLACEHOLDER);
   await fs.writeFile(path.join(dir, "turn", "output.md"), TURN_OUTPUT_PLACEHOLDER);
+  await fs.writeFile(path.join(dir, "turns", "history.jsonl"), ""); // Issue 6.5
 
   return { storyId, title, createdAt };
 }
