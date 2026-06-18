@@ -10,6 +10,8 @@ next-env.d.ts
 dist
 
 # env
+.env
+.env.*
 .env*.local
 
 # story workspace data (dev)
