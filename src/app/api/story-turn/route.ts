@@ -2,9 +2,19 @@ import { NextResponse } from "next/server";
 import { isValidStoryId, workspaceExists } from "@/lib/workspace";
 import { TurnOrchestrator, TurnBusyError } from "@/lib/turn-orchestrator";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
+import { ClaudeCodeRunner } from "@/lib/claude-code-runner";
 
-// 模块级单例：runner 在应用生命周期内不变
-const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+// 模块级单例：runner 在应用生命周期内不变。
+// AGENT_RUNNER=claude 启用真实 CLI；默认 fake 保证测试/开发不依赖凭证/网络。
+// docker-compose 默认不设 AGENT_RUNNER=claude，避免无 ANTHROPIC_API_KEY 时跑不起来。
+function resolveRunner() {
+  if (process.env.AGENT_RUNNER === "claude") {
+    return new ClaudeCodeRunner();
+  }
+  return new FakeAgentRunner();
+}
+
+const orchestrator = new TurnOrchestrator(resolveRunner());
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
