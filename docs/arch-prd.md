@@ -92,6 +92,15 @@ MVP 技术路线：
 34. 刷新页面后展示完整已提交历史。
 35. agent 冷启动时读取历史作为上下文，但不能修改历史文件。
 36. 历史追加失败视为回合失败并回滚。
+37. 故事初始化生成 Protagonist Core、第一人称叙述基调、心理描写偏好、基础 agency boundaries、主要角色 voice/动机和初始冲突材料。
+38. Story Turn 遵守最小 Narrative Turn Contract：先判断本回合有效变化和角色意图，再渲染玩家可见正文。
+39. 单次 Runner/LLM 调用仍允许完成一个回合；本阶段不要求拆分多 Agent 或多阶段外部编排。
+40. Runner 可在内部生成或记录本回合 Meaningful Change、NPC Character Intent、主角自动演出边界和是否到达 Decision Point。
+41. 内部叙事判断不得直接泄漏到 `turn/output.md`，玩家可见输出仍受主角视窗隔离约束。
+42. Story Workspace 需要为 Adaptive Authored Protagonist 保留可读写的 Markdown-first 状态位置。
+43. Continuous Performance 和 Decision Point 是回合结果语义，不改变 `turn/output.md` 作为唯一玩家可见输出源。
+44. Suggestion Gate 是 Decision Point 的交互辅助；自由输入始终保留，建议不得替代玩家输入。
+45. 本阶段不做性能/等待时间优化，也不直接改变 Claude Runner 行为作为叙事文档工作的组成部分。
 
 #### P1 / Post-MVP
 
@@ -217,6 +226,16 @@ MVP 技术路线：
 79. As a developer, I want turn history to be append-only, so that past turns cannot be retroactively modified.
 80. As a developer, I want the agent runner to read turn history for context but not modify it, so that history remains a stable record.
 81. As a developer, I want history append failure to cause turn failure and rollback, so that incomplete history is not preserved.
+82. As a developer, I want story initialization to create protagonist voice and agency material, so that later turns can render a stable first-person protagonist.
+83. As a developer, I want story initialization to create NPC voice and motivation material, so that later turns do not invent generic character behavior from scratch.
+84. As a developer, I want each story turn to declare or otherwise preserve why the turn mattered, so that decorative text does not pass as progress.
+85. As a developer, I want the runner to decide Meaningful Change before rendering output, so that narrative value drives prose rather than prose hiding stagnation.
+86. As a developer, I want NPC Character Intent to be part of turn generation context, so that important NPCs can act from immediate goals rather than only answering the player.
+87. As a developer, I want protagonist auto-performance boundaries represented in workspace state, so that low-risk reactions can be rendered while major choices remain protected.
+88. As a developer, I want explicit player corrections to be representable separately from inferred tendencies, so that feedback priority stays auditable.
+89. As a developer, I want inferred protagonist tendencies to carry evidence and confidence, so that a single action does not silently rewrite the protagonist.
+90. As a developer, I want Continuous Performance and Decision Point semantics to be expressible in turn output state, so that the UI can avoid meaningless forced input.
+91. As a developer, I want suggestions to be optional Decision Point aids, so that the interface can support guidance without removing free input.
 
 ## Implementation Decisions
 
@@ -281,6 +300,20 @@ MVP 技术路线：
 59. MVP does not include multi-container service split.
 60. MVP does not include cloud multi-tenant deployment.
 
+### Narrative Runtime Decisions
+
+1. The current architecture continues to allow one Runner/LLM invocation to complete one Story Turn.
+2. Narrative Turn Contract is a logical contract for turn generation, not a requirement to split services or agents.
+3. The turn generation order is: understand player input and current story state; read protagonist core, confirmed adjustments and necessary inferred tendencies; determine at least one Meaningful Change; determine relevant NPC current emotion, immediate goal, hidden intent and voice; decide active NPC behavior; decide which protagonist reactions can be auto-performed and which decisions must return to the player; render first-person visual-novel-style output; decide Continuous Performance versus Decision Point; update necessary world, character, relationship and protagonist tendency state.
+4. Internal turn metadata may include Meaningful Change, NPC Character Intent, allowed protagonist auto-performance and whether the turn reached a Decision Point.
+5. Internal NPC hidden intent and private state must not be rendered directly to the player.
+6. Existing protagonist-view isolation, fixed `turn/output.md`, workspace persistence, turn history and rollback rules remain binding.
+7. Adaptive Authored Protagonist state should remain Markdown-first and human-readable in MVP.
+8. Confirmed Adjustments and Inferred Tendencies should be distinguishable in state so explicit feedback can override inference.
+9. Continuous Performance and Decision Point are product-level turn states; they should not require token streaming.
+10. Suggestion Gate does not replace free input and should not require a fixed count of suggestions.
+11. This phase does not introduce fixed scripts, chapter outlines, route graphs, multi-agent Director/Actor/Renderer architecture, multi-candidate scoring, complex Beat state machines, full event queues, full VN dialogue block protocols, performance optimization or waiting-time optimization.
+
 ## Testing Decisions
 
 ### Testing Philosophy
@@ -299,10 +332,14 @@ Good tests should answer:
 8. Does story initialization create a playable workspace from natural language input?
 9. Does the app run inside Docker with environment-provided credentials?
 10. Does the architecture allow runner replacement through the adapter boundary?
+11. Does story initialization create protagonist and NPC narrative material without prewriting a fixed plot?
+12. Does a turn preserve internal Meaningful Change / Character Intent metadata without leaking private intent to player-visible output?
+13. Do Continuous Performance, Decision Point and suggestions remain compatible with fixed final output and no token streaming?
+14. Do protagonist corrections and inferred tendencies remain auditable workspace state rather than hidden runner session memory?
 
 ### Proposed Test Seams
 
-Because no repository is available in the current conversation, these are proposed architecture seams rather than references to existing code.
+These are architecture seams rather than file-by-file implementation requirements.
 
 #### 1. Full Story Turn Seam
 
@@ -536,11 +573,17 @@ The following are explicitly out of scope for this technical architecture PRD an
 34. Mobile app.
 35. Desktop app.
 36. Issue tracker publishing, because the issue tracker is not available in the current conversation.
-37. Codebase-specific ADR alignment, because no repository is available in the current conversation.
+37. Full Director Agent / Actor Agent / Renderer Agent split.
+38. Multi-candidate event generation and scoring.
+39. Complex Beat state machine.
+40. Full event queue.
+41. Full visual-novel dialogue block protocol.
+42. Performance and waiting-time optimization.
+43. Direct Claude Runner behavior changes as part of narrative documentation work.
 
 ## Further Notes
 
-This PRD was synthesized from the current product and architecture discussion. The project is starting from zero and no repository was available to inspect, so repository exploration, existing ADR review, existing test prior art, issue publishing and `ready-for-agent` triage labeling could not be completed here.
+This PRD is maintained against the current repository documentation baseline. The current architecture has already validated the Web shell, Story Workspace, Agent Runtime Adapter, Fake/Claude Runner boundary, random tool seam, rollback safety and Player-visible Turn History. New narrative requirements should be added through focused issues without weakening those boundaries.
 
 The current confirmed architecture direction is:
 
@@ -562,10 +605,13 @@ The current confirmed architecture direction is:
 16. Serial execution per story.
 17. Environment-variable credentials.
 18. No database, no account system, no custom runner in P0.
+19. Story initialization creates protagonist/character narrative material.
+20. Story turns follow a logical Narrative Turn Contract while still allowing a single Runner invocation.
+21. Internal narrative reasoning remains hidden from player-visible output.
 
 Recommended next step after this PRD:
 
-1. Convert this into a technical architecture issue.
-2. Mark it as the architecture baseline for MVP.
-3. Then produce vertical implementation issues from P0 only.
-4. Keep P1/P2 out of first execution plan unless a P0 decision explicitly requires a seam for future replacement.
+1. Keep `docs/issue.md` as the repository-local roadmap source of truth.
+2. Produce vertical implementation issues from P0 only.
+3. Keep P1/P2 out of first execution plan unless a P0 decision explicitly requires a small compatibility seam.
+4. Preserve Runner replacement, fixed output, workspace isolation, turn history and rollback semantics while adding narrative behavior.

@@ -13,6 +13,68 @@
 ### Player-visible Output（主角可见输出）
 回合完成后，用户能通过 Web 界面看到的内容。**只来自 `turn/output.md`**，不包含 agent stdout、内部日志、God State、NPC 私有记忆或随机判定日志。
 
+## 叙事与主角相关
+
+### Meaningful Change（有效变化）
+一个正常回合结束后，玩家能够感知到的叙事变化。可以是新信息、关系变化、角色决定、目标进展或受阻、风险变化、时间/地点/场景变化、新性格侧面、理解变化、新目标/放弃旧目标或冲突阶段变化。
+_Avoid_: 复述玩家输入、平级环境细化、无信息量身体/天气描写、同一情绪原地延长、只写得更长或更华丽
+
+### Character Intent（角色意图）
+重要角色在当前回合中的最小动态状态，包括 `currentEmotion`、`immediateGoal`、`hiddenIntent` 和 `voice`。角色台词与行动应服务于自己的即时目标，而不只是回答玩家、提供说明或等待玩家推进。
+_Avoid_: NPC 被动应答器、万能解释员、围绕玩家服务的无目标角色
+
+### Performance（表演）
+把 Meaningful Change 和 Character Intent 渲染成玩家可见内容的呈现层。优先通过潜台词、反问、回避、打断、停顿、动作与台词张力、角色语言习惯、回调和选择表现情绪，而不是直接解释 NPC 的全部心理。
+_Avoid_: 通用 AI 台词、抽象关系总结、模板化眼神/呼吸/手指描写、隐藏意图直出
+
+### Narrative Turn Contract（叙事回合契约）
+Story Turn 的叙事逻辑顺序：理解玩家输入和故事状态 → 读取主角模型 → 确定至少一个 Meaningful Change → 确定相关角色 Character Intent → 决定 NPC 主动行为 → 判断主角可自动演出与必须交还玩家的决定 → 渲染第一人称视觉小说式输出 → 判断 Continuous Performance 或 Decision Point → 更新必要状态。
+_Avoid_: 先写正文再事后找意义、每回合只扩写氛围、引入完整多 Agent 架构
+
+### Adaptive Authored Protagonist（自适应预设主角）
+主角拥有预设人格、第一人称叙述声音和常规行为方式；系统可以自动生成符合设定的心理活动、低风险台词和自然反应；玩家掌握关键选择、重大关系方向和不可逆决定；系统根据玩家长期行为和显式反馈逐渐微调主角，但不能根据单次行为过拟合。
+_Avoid_: 空白摄像头主角、完全独立于玩家的固定主角
+
+### Protagonist Core（基础男主骨架）
+创建故事时生成或确定、变化缓慢的主角基础模型。至少包含 `narrativeVoice`、`temperament`、`emotionalExpression`、`conflictStyle`、`relationshipStyle`、`humorStyle`、`initiative`、`moralBoundaries`、`speechPatterns` 和 `avoidExpressions`。
+_Avoid_: 只有姓名/身份、没有声音和行为倾向的玩家占位符
+
+### Confirmed Adjustments（玩家确认修正）
+来自创建故事时明确要求、玩家直接说明的长期偏好、纠正错误表现或“以后不要这样写”反馈的主角模型修正。优先级高于 Protagonist Core 和 Inferred Tendencies。
+_Avoid_: 把显式反馈当作低置信推测、让系统推测覆盖玩家纠正
+
+### Inferred Tendencies（推测倾向）
+根据多次玩家行为逐渐形成的主角倾向，必须包含 `tendency`、`confidence`、`evidence` 或 `evidenceCount`，必要时包含 `caution`。主要影响内心独白、低风险台词、冲突习惯、主动程度和常规互动方式，不得直接决定爱恨、原谅、承诺、关系定义、道德底线或重大选择。
+_Avoid_: 单次行为定型、把临时反应升级为稳定人格、偷偷把推测当事实
+
+### Player Agency（玩家主导权）
+玩家控制本回合明确输入、关键方向、重大关系选择、承诺/拒绝/信任/原谅等心理结论和不可逆决定。系统可以补全玩家已选择行为“如何发生”，但不能擅自决定玩家尚未选择的关键方向。
+_Avoid_: 替玩家告白、替玩家原谅、替玩家背叛、替玩家关闭重要选择
+
+### Continuous Performance（连续演出）
+当事件尚未到达真正需要玩家决定的位置时，系统继续推进当前人物和事件。可以继续 NPC 对话、主角心理活动、低风险自然反应和事件发展；玩家仍可自由输入打断。“继续”是系统级控制，不是主角台词或故事内行动。
+_Avoid_: 每小段都强制输入、无限无意义扩写、把继续当角色行动
+
+### Decision Point（决策点）
+关键控制权应交还玩家的位置。通常涉及 NPC 明确要求回答、关系重要变化、风险/障碍处理、是否公开信息、冲突升级/缓和/结束、承诺/拒绝/信任/原谅/关系方向、多个合理但系统不应替玩家判断的方向，或下一步会关闭重要选择/造成不可逆后果。
+_Avoid_: 停在纯环境描写、模糊感慨、无压力沉思、机械要求输入“继续”
+
+### Suggestion Gate（建议选项门槛）
+建议是 Decision Point 的交互辅助，不是剧情推进机制。建议数量允许为 0 到 4 个，不固定凑数；所有建议应回应同一个当前戏剧问题，点击建议只填入输入框，不自动提交，玩家始终可以自由输入。
+_Avoid_: 每回合强制四选项、横向开启无关支线、用”继续观察/继续思考”掩盖剧情没有推进
+
+### Protagonist Control Boundary（主角控制权边界）
+系统可自动处理与不得自行增加的行为分界。系统可补全玩家已明确行动的执行细节、不改变立场的自然接话、日常寒暄、符合人格的小动作、当下感知和心理活动、不关闭重要选择的低风险主动行为、符合稳定人格的自然反应和不构成重大承诺的过渡性台词。系统不得自行增加玩家未表达的新目标、重大承诺、关键关系决定、道德越界行为、与玩家当前输入冲突的台词、会关闭重要选择的决定、爱恨原谅决裂等关系定案和明显改变路线的不可逆行动。
+_Avoid_: 系统可自动做一切、系统不可自动做任何事、边界模糊导致替玩家决定关键方向
+
+### Explicit Feedback（显式反馈）
+玩家对主角表现的纠正，分两类：**本次纠正**只修正当前生成，不改变长期主角模型；**长期偏好**写入 Confirmed Adjustments，影响后续所有生成。显式反馈优先级高于系统根据行为作出的推测。
+_Avoid_: 把所有纠正当长期偏好、偷偷把推测升级为确定人格、不区分一次性和永久性修正
+
+### Inner Monologue Guideline（内心独白准则）
+第一人称心理描写的规范。系统应积极生成注意力变化、当下联想、记忆触发、瞬间情绪、内心吐槽、疑问和猜测、犹豫、尚未完成的冲动、符合主角基础人格的明确情绪表达、对角色行为和异常细节的即时理解。心理描写应有明确的主角声音，不能长期停留在”说不上来的感觉””心里有些复杂””一种莫名的情绪”等极度模糊和中性的表达。
+_Avoid_: 长期无心理描写、替玩家完成关键心理结论、用模糊中性表达回避声音
+
 ## 随机相关
 
 ### Random Tool（随机工具）
@@ -104,6 +166,18 @@ _Avoid_: runner 日志、诊断记录
 - 失败/回滚的 **Story Turn** 不产生 **History Entry**。
 - **Turn History** 是玩家视角的故事记录，不包含 God State、NPC 私有记忆或内部日志。
 - **Claude Code Runner** 读取 **Turn History** 作为玩家已见/已说的上下文，但不得修改或删除 **Turn History**。
+- 一个正常 **Story Turn** 应至少产生一个玩家可感知的 **Meaningful Change**。
+- **Narrative Turn Contract** 约束 **Story Turn** 的叙事逻辑，但不要求拆分新的 Agent Runtime。
+- **Character Intent** 可以影响 NPC 可见言行和后续状态，但 **hiddenIntent** 不得直接泄漏到 **Player-visible Output**。
+- **Performance** 渲染的是主角可见、可感知、可合理推断的内容，仍受主角视窗隔离约束。
+- **Adaptive Authored Protagonist** 由 **Protagonist Core**、**Confirmed Adjustments** 和 **Inferred Tendencies** 共同约束。
+- 主角模型优先级为：玩家本回合明确输入 → **Confirmed Adjustments** → **Protagonist Core** → 高置信 **Inferred Tendencies** → 低置信 **Inferred Tendencies** → 系统默认。
+- **Player Agency** 高于自动演出：系统可以补全低风险表现方式，不能替玩家作关键关系、道德或不可逆决定。
+- **Continuous Performance** 与 **Decision Point** 决定回合结尾形态；两者都不能绕过 **Meaningful Change** 要求。
+- **Suggestion Gate** 只在 **Decision Point** 上提供输入辅助；建议填入输入框但不自动提交，不能移除自由输入。
+- **Protagonist Control Boundary** 划分系统可自动演出与必须交还玩家的行为；系统可补全低风险表现方式，不能替玩家作关键关系、道德或不可逆决定。
+- **Explicit Feedback** 高于系统推测；本次纠正只影响当前生成，长期偏好写入 **Confirmed Adjustments**。
+- **Inner Monologue Guideline** 约束第一人称心理描写：应积极生成具体情绪和思考过程，不能长期停留在模糊中性表达，但不能擅自替玩家完成关键心理结论。
 
 ## 示例对话
 
