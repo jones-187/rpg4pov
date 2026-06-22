@@ -32,6 +32,30 @@ NPC 的台词、动作、语气和现场表现由对应角色代理生成，而�
 
 随机判定必须使用工具或程序产生的真随机，不能让模型“假装随机”。随机结果需要写入内部判定日志。系统不能为了照顾主角而强行限制负面结果。只要符合因果、角色认知、世界状态和随机判定，系统可以产生失败、误会、错过机会、关系恶化、NPC 背叛、NPC 离开、线索丢失和不可逆后果。
 
+### Target Narrative Experience
+
+rpg4pov 的目标体验进一步明确为偏 galgame、同人游戏和视觉小说式的小场景故事体验，而不是普通环境描写器、通用 AI 小说生成器或多角色群聊 UI。
+
+系统仍然保留小场景、多角色、主角视角受限、NPC 私有记忆、后台行动、真随机和失败后果等模拟基础；但玩家可见体验的核心应当是人物关系、角色对话、人物塑造、主角内心独白和情绪代入。
+
+玩家仍然可以自由输入，系统不采用固定选项树。玩家不需要逐字控制主角的每一个动作和日常台词，但必须掌握关键方向、重大决定和关系选择。系统负责让主角成为一个生动、连贯、有声音的人；玩家负责决定主角最终成为怎样的人。
+
+玩家可见叙事默认采用第一人称、主角限知视角、较充分的内心独白和视觉小说式的对话/心理/场景呈现。输出应像角色驱动的视觉小说，而不是流水账、泛环境描写或缺少人物意图的 AI 小说段落。
+
+NPC 和世界不能只是被动响应玩家动作。重要 NPC 应当有自己的即时目标、情绪、隐藏意图和说话方式；他们可以主动提问、试探、回避、打断、撒谎、靠近、离开、暴露脆弱或采取与玩家目标不同的行动。
+
+### Minimal Dynamic Narrative Principle
+
+当前不采用预写完整剧本、固定章节大纲、固定角色路线、固定结局或预先锁定具体事件顺序。但系统也不能完全逐回合贪心生成。
+
+本阶段采用最小动态原则：
+
+> 不预写未来剧情，但每个回合必须实时判断：这一回合为什么值得发生，以及结束后什么发生了变化。
+
+每个正常回合结束后，至少产生一个玩家能够感知的 Meaningful Change。变化可以很小，但必须让人物关系、角色理解、信息、风险、目标、场景、冲突阶段或情绪位置发生可感知移动。慢节奏、暧昧、闲聊和日常场景可以存在，但慢不等于不推进。
+
+本阶段明确不立即引入完整 Director 系统、复杂 Beat 状态机、多 Agent 拆分、多候选剧情打分、长期剧情预测或完整事件队列；只有在最小动态方案实测不足后再单独设计。
+
 ### MVP Scope
 
 MVP 只支持小场景故事：
@@ -80,6 +104,21 @@ P0 是第一版必须具备的能力，否则核心体验不成立。
 19. 系统生成角色不主动提示用户，只在故事中自然出现。
 20. 系统生成角色必须有知识边界，不能直接替主角解开主线问题。
 21. 用户只能输入角色卡设定，不直接查看或调整内部数值。
+22. 玩家可见叙事默认采用第一人称、主角限知和较充分的内心独白。
+23. 主角具有 Adaptive Authored Protagonist 模型：预设人格、稳定叙述声音、常规行为方式和可被玩家长期修正的边界。
+24. 故事初始化必须提供 Protagonist Core、第一人称叙述基调、心理描写偏好和基础 agency boundaries。
+25. 重要 NPC 初始化必须包含 voice、基本动机和支撑冲突/秘密/压力源的材料。
+26. 正常 Story Turn 必须产生至少一个玩家可感知的 Meaningful Change。
+27. 重要 NPC 在回合中不能只被动回答；其台词与行动应服务于当前情绪、即时目标、隐藏意图和独立 voice。
+28. 玩家可见输出应优先通过潜台词、行动选择、打断、回避、反问和具体行为呈现情绪。
+29. 系统可以自动演出符合主角人格的心理活动、低风险台词和自然反应。
+30. 系统不得替玩家作出重大关系、道德、承诺、原谅、信任、背叛或不可逆决定。
+31. 玩家本回合明确输入优先于基础人格、确认修正和历史推测。
+32. 显式长期修正高于基础人格和系统推测。
+33. 多次行为形成的推测倾向必须保留证据和置信度，不能由单次行为升级为稳定人格。
+34. 当事件尚未到达真正决策点时，系统可以进入 Continuous Performance，而不是每段文字后强制玩家输入。
+35. Decision Point 只在关键控制权应交还玩家时出现，并应停在明确可回应状态。
+36. Suggestion Gate 只服务 Decision Point，建议数量允许为 0 到 4 个，始终保留自由输入。
 
 #### P1 / Post-MVP
 
@@ -226,6 +265,26 @@ P2 是高级模拟能力，暂不作为近期目标。
 102. As a system maintainer, I want MVP requirements to exclude author mode, so that the product does not split between player and GM workflows too early.
 103. As a system maintainer, I want MVP requirements to exclude large-scale town simulation, so that token and complexity cost remain controlled.
 104. As a system maintainer, I want the first version to validate the core loop, so that future complexity can be added safely.
+105. As a player, I want the story to feel like a character-driven visual novel, so that relationships, dialogue and inner monologue carry the experience.
+106. As a player, I want the protagonist to have a stable first-person narrative voice, so that I am not playing a blank camera.
+107. As a player, I want the protagonist to have inner reactions and thoughts, so that the story has emotional immediacy.
+108. As a player, I want the system to avoid deciding major relationship conclusions for me, so that I keep control of commitment, trust, forgiveness and rejection.
+109. As a player, I want ordinary protagonist reactions to be performed naturally, so that I do not need to micromanage every greeting, pause or low-risk reply.
+110. As a player, I want to correct the protagonist’s portrayal, so that future narration can better match how I want to play.
+111. As a player, I want the system to distinguish one-time corrections from long-term preferences, so that a regeneration note does not permanently rewrite the protagonist.
+112. As a player, I want every normal turn to change something I can perceive, so that the story does not stall in decorative description.
+113. As a player, I want slow scenes to still move relationships or understanding, so that daily conversation can matter without needing constant plot twists.
+114. As a player, I want NPCs to pursue their own immediate goals, so that they feel like people rather than response devices.
+115. As a player, I want NPCs to evade, interrupt, lie, test me or change the topic when appropriate, so that conversations have social tension.
+116. As a player, I want character emotion to be shown through subtext, timing and action, so that narration does not over-explain hidden psychology.
+117. As a player, I want the system to continue performance when no real decision is needed, so that scenes do not stop after every small paragraph.
+118. As a player, I want to interrupt a continuous performance with free input, so that I still have agency while the scene flows.
+119. As a player, I want the system to stop at real decision points, so that important choices remain mine.
+120. As a player, I want decision points to make the current dramatic question clear, so that I understand what I am deciding and why it matters.
+121. As a player, I want suggestions only when they help with a real decision, so that options do not replace free input or create irrelevant branches.
+122. As a player, I want suggestions to fill the input box rather than auto-submit, so that I can revise them before acting.
+123. As a system maintainer, I want narrative turn outputs to preserve protagonist-view isolation, so that richer inner monologue does not leak NPC private intent.
+124. As a system maintainer, I want new narrative quality checks to avoid fixed scripts, routes and endings, so that the system stays dynamically generated.
 
 ## Implementation Decisions
 
@@ -241,6 +300,134 @@ P2 是高级模拟能力，暂不作为近期目标。
 8. Temporary characters can be upgraded into formal NPCs when they become important through repeated interaction, possession of important information, participation in key events, relationship formation, or future reuse value.
 9. Upgraded characters receive only lightweight background needed to explain current behavior and current story function. The system must not use upgrades to invent major unearned secrets or solve the main conflict.
 10. System-generated characters may develop major relationships over time, but major relationships should emerge through soft facts, evidence, setup, probability checks and consistency validation rather than sudden arbitrary retcons.
+
+### Narrative Experience Decisions
+
+1. The target player-visible experience is closer to galgame, fan game and visual novel narration than generic prose generation.
+2. Character relationships, dialogue, protagonist inner monologue, emotional identification and character shaping are first-class product goals.
+3. Player-visible narration defaults to first person, protagonist-limited viewpoint and enough inner monologue to establish a recognizable protagonist voice.
+4. The system should actively write attention shifts, memories triggered by current stimuli, immediate emotions, doubts, impulses, hesitation and protagonist-specific commentary.
+5. Protagonist psychology should be concrete and voiced. Long-term reliance on vague phrases such as “a strange feeling” or “complicated emotions” is not acceptable.
+6. NPC and world behavior should be active. Important NPCs can start conversations, ask questions, test the protagonist, evade, lie, interrupt, leave, approach, hide information or expose vulnerability.
+7. Character emotion should be performed through subtext, timing, interruption, avoidance, concrete action, callbacks and tension between words and intent.
+8. The system should avoid generic AI dialogue such as overly mature, polite, therapeutic or abstract relationship summaries when they do not match the character.
+9. More text, prettier prose or more environmental detail does not count as better narration unless it changes information, relationship, risk, goal, scene state or character understanding.
+
+### Meaningful Change Decisions
+
+Every normal turn must produce at least one player-perceivable Meaningful Change. Valid changes include:
+
+1. Gaining new information.
+2. A relationship changing.
+3. A character making a decision, commitment, refusal, lie or stance change.
+4. Player goal progressing or being obstructed.
+5. Risk escalating, being exposed, mitigated or resolved.
+6. Time, place or scene changing.
+7. A character revealing a new personality facet.
+8. The player's understanding of a character changing.
+9. A character forming a new goal or abandoning an old one.
+10. The current conflict entering a new stage.
+
+The following alone do not count as Meaningful Change:
+
+1. Restating or expanding the player's input.
+2. Adding pure environment description.
+3. Adding parallel detail to the same object.
+4. Continuing the same emotion without new behavior or relationship change.
+5. Expressing the same information as the previous turn with more words.
+6. A character maintaining their original attitude and waiting for the player to push.
+7. Simply writing longer or more ornate text.
+8. Repeating uninformative body, light, weather or atmospheric details for mood.
+
+Slow scenes, idle conversation, ambiguous moments and quiet pacing are allowed, but they must advance at least one of: relationship, character understanding, emotional position, trust or misunderstanding, or conditions for future conflict. Slow does not mean stationary.
+
+### Dynamic Narrative Decisions
+
+1. The system does not prewrite the future plot.
+2. The system does not use fixed chapter outlines, fixed character routes, fixed endings or pre-locked event sequences in the current phase.
+3. The system must still avoid greedy turn-by-turn stagnation by deciding why the current turn matters before rendering it.
+4. A normal turn must produce at least one player-perceivable Meaningful Change.
+5. Meaningful Change can be new information, relationship movement, a character decision, goal progress or obstruction, risk change, time/place/scene change, new character facet, changed understanding, new/abandoned goal, or conflict-stage movement.
+6. Repetition, restatement, parallel detail, decorative environment expansion, unchanged emotion, unchanged character attitude, or longer prose alone do not count as Meaningful Change.
+7. Slow scenes are valid when they move relationship, trust, misunderstanding, emotional position, character understanding or future conflict conditions.
+8. The current phase does not introduce a full Director system, complex Beat state machine, multi-agent split, multi-candidate plot generation and scoring, long-term plot prediction, full event queue or full foreshadowing manager.
+
+### Protagonist and Agency Decisions
+
+1. The protagonist model is Adaptive Authored Protagonist.
+2. The protagonist has a preset personality, stable first-person narrative voice and ordinary behavior patterns.
+3. The system may automatically generate in-character psychology, low-risk dialogue, natural reactions, execution details for explicitly chosen actions and light proactive behavior during long stalls.
+4. The player controls key direction, major relationship choices, irreversible decisions and explicit current-turn input.
+5. The system must not invent new player goals, major commitments, key relationship definitions, moral verdicts, irreversible actions or decisions that close important alternatives.
+6. The system can fully describe emotional and cognitive process, but must not complete key psychological conclusions such as love, forgiveness, trust, betrayal, revenge or permanent rejection without player input or a real decision point.
+7. Protagonist Core is created at story initialization and changes slowly.
+8. Confirmed Adjustments come from explicit setup, direct long-term preference, correction or feedback and override the base protagonist and inferred tendencies.
+9. Inferred Tendencies are gradual, evidence-bearing and confidence-bearing. They affect voice, low-risk reactions and routine interaction style, but do not decide major choices.
+10. Priority order is: current player input, Confirmed Adjustments, Protagonist Core, high-confidence tendencies, low-confidence tendencies, system default.
+
+### Protagonist Control Boundary Decisions
+
+The system may automatically handle:
+
+1. Execution details for actions the player has already committed to.
+2. Natural replies that do not change the protagonist's stance.
+3. Routine greetings and small talk.
+4. Small gestures and habits consistent with the protagonist's personality.
+5. Immediate perception and psychological activity.
+6. Low-risk proactive behavior that does not close important choices.
+7. Mild proactive advancement during long stalls, consistent with the protagonist's character.
+8. Natural reactions reliably inferrable from the player's current input and established personality.
+9. Transitional dialogue that does not constitute a major commitment.
+
+The system must not autonomously add:
+
+1. New goals the player has not expressed.
+2. Major commitments.
+3. Key relationship decisions.
+4. Moral boundary violations.
+5. Dialogue that contradicts the player's current input.
+6. Decisions that close other important choices.
+7. Relationship verdicts such as love, hatred, forgiveness or rupture.
+8. Irreversible actions that clearly change the route.
+
+The governing principle is:
+
+> The system can complete how a player-chosen action happens, but must not decide a key direction the player has not chosen.
+
+### Protagonist Core Example Directions
+
+Protagonist Core should be specific enough to support recognizable first-person inner monologue. Example directions include:
+
+- Calm and restrained, but not cold.
+- More likely to show care through actions than sweet words.
+- Observes first in conflict, then asks directly once the problem is clear.
+- Occasionally self-deprecating, but never glib.
+- Willing to break long silences.
+- Does not make permanent commitments lightly.
+
+These are illustrative, not prescriptive. Each story's Protagonist Core will differ.
+
+### Explicit Feedback and Continuous Fitting Decisions
+
+The system should support player correction mechanisms such as:
+
+- "This doesn't feel like me."
+- "The inner monologue is too cold."
+- "The inner monologue is too much."
+- "I wouldn't be this angry."
+- "I don't like her."
+- "Don't interpret care as love."
+- "The tone should be more restrained."
+- "Don't make this kind of commitment for me."
+- "The protagonist can be more proactive."
+- "Only regenerate this time; don't record this long-term."
+
+The system must distinguish:
+
+1. **One-time correction**: Only affects current generation. Does not change long-term protagonist model.
+2. **Long-term preference**: Written into Confirmed Adjustments. Affects all future generation.
+
+Explicit feedback must override system inference. The system may fit the player from historical behavior, but must not silently upgrade inference into confirmed personality.
 
 ### Story State Decisions
 
@@ -336,6 +523,98 @@ P2 是高级模拟能力，暂不作为近期目标。
 7. Stage changes should depend on character state, context and random judgment.
 8. In MVP, the full staged intent model can be simplified, but the requirement remains that intended future actions are uncertain until resolved.
 
+### First-Person and Inner Monologue Decisions
+
+1. Player-visible narration defaults to first person, protagonist-limited viewpoint.
+2. The system should actively write attention shifts, memories triggered by current stimuli, immediate emotions, doubts, impulses, hesitation and protagonist-specific commentary.
+3. Protagonist psychology should be concrete and voiced. Long-term reliance on vague phrases such as "a strange feeling" or "complicated emotions" is not acceptable.
+4. The system should write complete psychological processes: what the protagonist noticed, why a detail made them pause, what suspicion or expectation arose, and how they waver between interpretations.
+5. The system may write partial psychological movements: "I wanted to ask her", "That line made me uncomfortable", "I'm starting to suspect it's not what she said", "The words reached my mouth, but stopped."
+6. Whether to actually press the question, whether to believe, whether to forgive — these must be returned to the player at key moments.
+7. The following content must in principle come from explicit player input or be returned to the player at a real decision point: falling in or out of love, forgiving or not forgiving, trusting or distrusting someone, confessing, committing, refusing, defining a relationship, reaching a moral verdict, taking revenge, betraying, or any other irreversible action.
+
+The governing principle is:
+
+> The system may fully describe the process of emotion and thought, but must not complete key psychological conclusions or major decisions for the player.
+
+### Narrative Turn Contract Decisions
+
+The current phase still allows one Runner/LLM invocation to complete one Story Turn, but the logical order must be preserved:
+
+1. Understand player input and current story state.
+2. Read protagonist core, confirmed adjustments and necessary inferred tendencies.
+3. Determine at least one Meaningful Change for this turn.
+4. Determine relevant NPC current emotion, immediate goal, hidden intent and voice.
+5. Decide what active behavior the NPC will take.
+6. Decide which protagonist reactions can be auto-performed and which decisions must be returned to the player.
+7. Render the result as first-person, galgame/visual-novel-style player-visible output.
+8. Determine whether the turn should enter Continuous Performance or stop at a Decision Point.
+9. Update necessary world, character, relationship and protagonist tendency state.
+
+Internal turn metadata may include:
+
+- This turn's Meaningful Change.
+- NPC Character Intent.
+- Allowed protagonist auto-performance.
+- Whether the turn reached a Decision Point.
+
+Internal NPC hidden intent and private state must not be rendered directly to the player. Existing protagonist-view isolation rules remain binding.
+
+### NPC Character Intent Decisions
+
+Important NPCs must not only passively answer the player or provide information. Before each turn, the system should consider relevant NPCs' minimal dynamic state:
+
+1. `currentEmotion`: The NPC's primary emotion right now.
+2. `immediateGoal`: What the NPC currently wants from the player, other characters or the current scene.
+3. `hiddenIntent`: The NPC's real purpose, need, worry or probe that they will not directly state.
+4. `voice`: How the NPC specifically speaks, including expression habits, directness level, avoidance patterns, humor style and forbidden generic expressions.
+
+NPC dialogue and behavior should serve their own `immediateGoal`, not only:
+
+- Answering the player's questions.
+- Providing plot exposition.
+- Complying with the player's requests.
+- Waiting for the player to advance.
+
+NPCs may proactively:
+
+- Start conversations.
+- Ask questions.
+- Test or probe.
+- Evade or deflect.
+- Lie.
+- Interrupt.
+- Change the topic.
+- Leave.
+- Approach.
+- Conceal information.
+- Expose vulnerability.
+- Take actions that differ from the player's goals.
+
+### Performance and Presentation Decisions
+
+1. After determining this turn's Meaningful Change and Character Intent, the system renders them into player-visible content.
+2. Character emotion should be performed through subtext, counter-questions, evasion, interruption, pauses, answers that dodge the question, actions that create tension with dialogue, character-specific speech habits, active choices to do or not do something, callbacks to past details, gaps between words and real intent, and different understandings of the same event.
+3. The system should avoid: directly explaining the NPC's full psychology, having all characters use similar mature/polite/rational expressions, generic AI dialogue such as "I understand your feelings" or "we should face this honestly", attaching template eye/lip/finger/breathing descriptions to every line, stacking uninformative environment and body descriptions for the sake of seeming detailed, long abstract summaries about relationships/trust/life, writing more or prettier text without actual change, and having all characters orbit the player without their own goals and stances.
+
+### Performance Flow Decisions
+
+1. The system should not force a new protagonist action after every small paragraph when the scene has not reached a real choice.
+2. Continuous Performance means the current people and event continue naturally until another Meaningful Change occurs or a real Decision Point is reached.
+3. During Continuous Performance, NPCs may continue dialogue or action, the protagonist may have inner monologue, and the system may generate low-risk natural reactions consistent with the protagonist.
+4. The player can still interrupt Continuous Performance with free input.
+5. “Continue” is a system-level control, not a protagonist line or story-world action.
+6. Continuous Performance must not become meaningless infinite elaboration. Each continuation still needs Meaningful Change or movement toward a Decision Point.
+7. A Decision Point appears when the next step involves a major relationship direction, risk handling, information disclosure, conflict escalation/de-escalation, commitment, refusal, trust, forgiveness, irreversible consequence or multiple reasonable directions the system should not choose for the player.
+8. A Decision Point should stop in a clear respondable state and make the current dramatic question understandable.
+9. A Decision Point should not stop at pure environment description, vague reflection, unpressured silence or a generic “what happens next” prompt.
+10. Suggestions are an input aid for Decision Points, not a story propulsion mechanism.
+11. Suggestion count can be 0, 2, 3 or 4. The system must not produce four options just to fill a fixed shape.
+12. All suggestions should answer the same current dramatic question and represent distinct attitudes or handling strategies.
+13. Suggestions should include at least one option that clearly advances the current conflict and at least one relatively neutral option when appropriate.
+14. Suggestions should fit the current protagonist and should not open unrelated horizontal branches merely to simulate freedom.
+15. Clicking a suggestion fills the input box only; it does not auto-submit and free input remains available.
+
 ### Group Scene Decisions
 
 1. In group scenes, the controller decides who speaks, who interrupts, who remains silent and who only visibly reacts.
@@ -369,10 +648,15 @@ Good tests should verify:
 8. System-generated NPCs are logged internally and appear naturally in story text.
 9. Temporary characters can be upgraded without inventing unearned major secrets.
 10. Negative outcomes can occur when justified.
+11. Normal turns produce player-perceivable Meaningful Change.
+12. Important NPCs act from Character Intent rather than passive exposition.
+13. Protagonist-visible output has a stable first-person voice without leaking NPC private state.
+14. Protagonist auto-performance respects player agency boundaries.
+15. Continuous Performance and Decision Points stop in the correct interaction state.
 
 ### Proposed Test Seams
 
-Because no codebase was available in the current conversation, these seams are expressed at the domain level rather than tied to existing modules.
+These seams are expressed at the domain contract level so they remain valid while the runtime evolves.
 
 1. Story Turn Processing Seam
 
@@ -507,6 +791,42 @@ Expected coverage:
 - Selected NPCs generate their own performance.
 - Silent reactions are visible without exposing private thought.
 
+1. Narrative Turn Contract Seam
+
+Test whether a turn satisfies narrative value before prose quality is considered.
+
+Expected coverage:
+
+- A normal turn records or implies at least one Meaningful Change.
+- Pure restatement, parallel description and decorative expansion are rejected as sole progress.
+- Important NPCs have current emotion, immediate goal, hidden intent and voice considered.
+- NPC private intent affects visible behavior without being directly revealed.
+- Output stays first-person and protagonist-limited.
+
+1. Adaptive Authored Protagonist Seam
+
+Test protagonist voice, automatic low-risk behavior and player agency boundaries.
+
+Expected coverage:
+
+- Protagonist Core is present and used for inner monologue.
+- Confirmed Adjustments override core and inferred tendencies.
+- Inferred Tendencies include evidence and confidence.
+- Single actions do not become permanent personality changes.
+- Major relationship, moral and irreversible decisions remain with the player.
+
+1. Decision Point and Suggestion Gate Seam
+
+Test whether the system stops or continues at the right interaction boundary.
+
+Expected coverage:
+
+- Continuous Performance is allowed when no real decision is needed.
+- Continuing still produces Meaningful Change or reaches a Decision Point.
+- Decision Points make the current dramatic question clear.
+- Suggestions are optional, 0 to 4 items, and answer one shared dramatic question.
+- Suggestions fill input but do not auto-submit, and free input remains available.
+
 ### MVP Test Priority
 
 P0 tests should prioritize:
@@ -519,6 +839,9 @@ P0 tests should prioritize:
 6. Character agent output filtering.
 7. Player Knowledge Log.
 8. Negative consequence behavior.
+9. Narrative Turn Contract.
+10. Adaptive Authored Protagonist agency boundaries.
+11. Decision Point and Suggestion Gate behavior.
 
 P1 tests should add:
 
@@ -550,30 +873,47 @@ The following are explicitly out of scope for MVP:
 15. Complex inventory and economy systems.
 16. Full database-backed analytics or visualization.
 17. Issue tracker automation, unless project tooling is available.
-18. Codebase-specific implementation details, because no repository was available in this conversation.
+18. Codebase-specific implementation details that belong in future issue plans rather than product requirements.
 19. Direct integration with SillyTavern as part of MVP.
 20. Large-scale relationship graph across many characters.
+21. Prewritten complete scripts.
+22. Fixed chapter outlines, character routes or endings.
+23. Pre-locked future event order.
+24. Full Director Agent, Actor Agent and Renderer Agent split.
+25. Multi-candidate event generation and scoring.
+26. Complex Beat state machine.
+27. Full event queue.
+28. Complex emotional numeric systems or affection-stat gameplay.
+29. Full foreshadowing management system.
+30. Large-scale structured output protocol refactor.
+31. Full visual-novel dialogue block protocol.
+32. Performance and waiting-time optimization.
 
 ## Further Notes
 
-This PRD was synthesized from prior requirement discussion. No code repository was available in the current conversation, so repository exploration, ADR review, issue publication and application of the `ready-for-agent` triage label could not be performed here.
+This PRD is maintained against the repository documentation baseline. The current MVP should continue to protect the existing Story Workspace, player-visible output, turn history, random judgment and protagonist-view isolation boundaries while adding the narrative experience requirements above.
 
-When the repository and issue tracker are available, the next step should be:
+When turning this PRD into executable work, the next step should be:
 
-1. Explore the current codebase and project glossary.
-2. Align terminology with existing domain vocabulary.
-3. Identify existing seams for story turn processing, model invocation, persistence, randomness and logging.
-4. Convert the P0 section into one or more implementation issues.
-5. Publish the issue with the `ready-for-agent` triage label.
-6. Keep P1 and P2 as follow-up issues or milestone notes.
+1. Align terminology with `CONTEXT.md`.
+2. Keep issue slices vertical and independently verifiable.
+3. Convert P0 requirements into focused issues rather than one large narrative-system issue.
+4. Keep P1/P2 out of first execution unless a P0 issue explicitly needs a small compatibility seam.
+5. Avoid changing Claude Runner behavior, performance strategy or multi-agent architecture as part of narrative documentation work.
 
 The MVP should be judged successful if a user can run a small story where:
 
 - the user only controls the protagonist;
+- the story reads like a first-person, character-driven visual novel;
 - NPCs maintain private memory;
 - hidden facts do not leak;
 - player guesses are treated as hypotheses;
 - NPCs react to what the protagonist says and does;
+- normal turns produce perceptible narrative change;
+- the protagonist has a stable voice and meaningful inner monologue;
+- the system performs low-risk protagonist reactions while leaving major choices to the player;
+- continuous scenes can flow until real decision points;
+- suggestions appear only when they serve the current dramatic question;
 - risky actions can fail;
 - true randomness affects outcomes;
 - off-screen events can change the world without becoming visible to the protagonist;
