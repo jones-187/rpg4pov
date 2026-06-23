@@ -488,6 +488,7 @@ Explicit feedback must override system inference. The system may fit the player 
 10. For protagonist-present scenes, character agents use performance mode.
 11. For background key events, character agents may use decision mode.
 12. Background key events do not require complete private dialogue simulation. They should call relevant character agents only for key decisions and then summarize the event.
+13. MVP 中"角色代理"首先是逻辑角色视角、私有角色状态和独立决策边界，不要求每个 NPC 启动独立进程、独立模型调用或独立 Runner。当前允许一个 Runner 在一个 Story Turn 中读取多个角色的私有状态、分别模拟各角色的目标判断和行为，同时保持角色之间的记忆与信息隔离。不要误解为每个 NPC 必须调用一次 Claude、当前阶段必须实现多 Agent 并行、或 Issue 8 必须拆多个独立运行时。
 
 ### Controller Decisions
 
@@ -550,6 +551,8 @@ The current phase still allows one Runner/LLM invocation to complete one Story T
 7. Render the result as first-person, galgame/visual-novel-style player-visible output.
 8. Determine whether the turn should enter Continuous Performance or stop at a Decision Point.
 9. Update necessary world, character, relationship and protagonist tendency state.
+
+Narrative Turn Contract 负责叙事质量，包括 Meaningful Change、Character Intent、NPC 主动行动、Performance、避免平级细化、第一人称叙事基础规则和正文结束在自然叙事边界。不包括正式的 `continue | decision` 数据结构、Suggestion Gate、UI 建议、"继续"命令、interaction state API 和持久化——这些由 Decision Points & Input Guidance 负责。
 
 Internal turn metadata may include:
 
@@ -614,6 +617,26 @@ NPCs may proactively:
 13. Suggestions should include at least one option that clearly advances the current conflict and at least one relatively neutral option when appropriate.
 14. Suggestions should fit the current protagonist and should not open unrelated horizontal branches merely to simulate freedom.
 15. Clicking a suggestion fills the input box only; it does not auto-submit and free input remains available.
+
+### Interaction State Decisions
+
+1. 叙事正文（`turn/output.md`）和交互状态（`turn/interaction.json`）是两个不同概念。叙事正文是故事内容；交互状态是当前回合的 continue/decision 模式和建议。
+2. 交互状态属于受控的玩家可见输出，不能从 agent stdout、任意日志或内部状态直接拼装。
+3. 交互状态应被 snapshot/rollback 覆盖。
+4. 刷新页面后应能恢复当前 continue/decision 状态和建议。
+5. 缺失、格式错误和不合法建议的处理方式应在 Issue 10 plan 中定义。
+6. Issue 12 必须验证交互状态中不能泄漏 hiddenIntent、NPC 私密状态和内部推理。
+7. 叙事正文仍只来自 `turn/output.md`，交互状态不改变此规则。
+
+### Story History Entry Decisions
+
+1. 玩家可见历史为带类型的结构，区分 opening（开场内容，无玩家输入）和 turn（正常回合，有玩家输入）。
+2. 开场主角视窗必须进入完整的玩家可见历史。
+3. 刷新页面后必须能够恢复并展示开场内容。
+4. 不得伪造一条"开始故事"玩家输入。
+5. Initializer 提交 opening entry，TurnOrchestrator 提交 turn entry。
+6. committed history 的写入者应表述为"受信任的系统提交者"，而不是只限 TurnOrchestrator。
+7. Runner / Claude 仍然不得直接修改 committed history。
 
 ### Group Scene Decisions
 
