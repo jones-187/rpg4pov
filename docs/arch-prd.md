@@ -101,6 +101,9 @@ MVP 技术路线：
 43. Continuous Performance 和 Decision Point 是回合结果语义，不改变 `turn/output.md` 作为唯一玩家可见输出源。
 44. Suggestion Gate 是 Decision Point 的交互辅助；自由输入始终保留，建议不得替代玩家输入。
 45. 本阶段不做性能/等待时间优化，也不直接改变 Claude Runner 行为作为叙事文档工作的组成部分。
+46. 开场主角视窗（opening）必须进入完整的玩家可见历史；刷新页面后必须能够恢复并展示开场内容；不得伪造一条"开始故事"玩家输入。玩家可见历史为带类型的结构（opening 和 turn），Initializer 提交 opening entry，TurnOrchestrator 提交 turn entry。Runner/Claude 仍然不得直接修改 committed history。committed history 的写入者应表述为"受信任的系统提交者"，而不是只限 TurnOrchestrator。
+47. 叙事正文（`turn/output.md`）和交互状态（`turn/interaction.json`）是两个不同概念。interaction state 属于受控的玩家可见输出，不能从 agent stdout、任意日志或内部状态直接拼装。interaction state 应被 snapshot/rollback 覆盖；刷新页面后应能恢复当前 continue/decision 状态和建议。缺失、格式错误和不合法建议的处理方式应在 Issue 10 plan 中定义。
+48. MVP 中"角色代理"首先是逻辑角色视角、私有角色状态和独立决策边界，不要求每个 NPC 启动独立进程、独立模型调用或独立 Runner。当前允许一个 Runner 在一个 Story Turn 中读取多个角色的私有状态、分别模拟各角色的目标判断和行为，同时保持角色之间的记忆与信息隔离。
 
 #### P1 / Post-MVP
 
@@ -313,6 +316,9 @@ MVP 技术路线：
 9. Continuous Performance and Decision Point are product-level turn states; they should not require token streaming.
 10. Suggestion Gate does not replace free input and should not require a fixed count of suggestions.
 11. This phase does not introduce fixed scripts, chapter outlines, route graphs, multi-agent Director/Actor/Renderer architecture, multi-candidate scoring, complex Beat state machines, full event queues, full VN dialogue block protocols, performance optimization or waiting-time optimization.
+12. The player-visible story timeline is a typed structure: `opening` entries (no player input, submitted by initializer) and `turn` entries (with player input, submitted by TurnOrchestrator). Both are committed through a trusted history committer interface. Runner/Claude must not directly modify committed history. The opening entry must persist in the player-visible timeline and be restorable after page refresh. No fake "start story" player input shall be created.
+13. Narrative content (`turn/output.md`) and interaction state (`turn/interaction.json`) are separate concepts. Interaction state includes the current turn's interaction mode (continue or decision) and, for decision mode, the current dramatic question and 0–4 suggestions. Interaction state belongs to controlled player-visible output; it must not be assembled from agent stdout, arbitrary logs or internal state. It should be covered by snapshot/rollback and restorable after page refresh. Missing, malformed or invalid interaction state should be handled with graceful degradation defined in the Issue 10 plan.
+14. In MVP, "character agent" means logical character perspective, private character state and independent decision boundaries. It does not require each NPC to start an independent process, independent model invocation or independent Runner. A single Runner may read multiple characters' private state within one Story Turn, simulate each character's goals, judgments and behavior separately, and maintain memory and information isolation between characters.
 
 ## Testing Decisions
 
@@ -336,6 +342,8 @@ Good tests should answer:
 12. Does a turn preserve internal Meaningful Change / Character Intent metadata without leaking private intent to player-visible output?
 13. Do Continuous Performance, Decision Point and suggestions remain compatible with fixed final output and no token streaming?
 14. Do protagonist corrections and inferred tendencies remain auditable workspace state rather than hidden runner session memory?
+15. Does the opening entry persist in the player-visible timeline and restore correctly after page refresh?
+16. Does the interaction state (continue/decision, suggestions) persist separately from narrative content and restore correctly after page refresh?
 
 ### Proposed Test Seams
 

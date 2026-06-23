@@ -2,7 +2,7 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**Issue 6.5 — Player-visible Turn History**。
+当前仓库状态：**Issue 6.5 已完成，进入故事初始化与叙事能力建设阶段**。
 首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出。
 已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam。
 已保存并展示玩家可见的回合历史（`turns/history.jsonl`）。

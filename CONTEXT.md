@@ -133,16 +133,40 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent
 _Avoid_: 版本历史、备份、checkpoint
 
 ### Turn History（回合历史）
-已提交的玩家可见回合历史，存储在 `turns/history.jsonl`。每条记录包含 turnId、at、input、output。只由 TurnOrchestrator 在成功回合提交阶段追加。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
+已提交的玩家可见故事时间线，存储在 `turns/history.jsonl`。条目类型包括 opening（开场内容，无玩家输入）和 turn（正常回合，有玩家输入）。由受信任的系统提交者（initializer 提交 opening，TurnOrchestrator 提交 turn）追加。Runner / Claude 不得直接修改。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
 _Avoid_: 完整世界状态、God State 日志、版本历史、checkpoint
 
-### History Entry（历史条目）
-Turn History 中的单条记录。包含：
-- turnId: 唯一标识符（UUID）
-- at: ISO 时间戳
-- input: 玩家输入（主角行动/台词）
-- output: 主角可见输出
+### Story History Entry（故事历史条目）
+玩家可见时间线中的统一条目。分为两类：`opening`（开场内容，无玩家输入）和 `turn`（正常回合，有玩家输入）。不同写入者（initializer、TurnOrchestrator 等）通过统一的受信任提交接口追加条目，条目类型和写入者身份在条目中记录。GET story 和前端展示读取的是统一的玩家可见时间线。
+_Avoid_: 伪造"开始故事"玩家输入、区分不出开场与回合、由 Runner 直接修改 committed history
+
+### Opening Entry（开场条目）
+Story History Entry 的 `opening` 类型。由故事初始化流程（initializer）提交。不包含玩家 input，但必须进入完整的玩家可见历史、刷新后可恢复、出现在前端时间线的最前端。
+_Avoid_: 不写入玩家可见历史、用假 input 伪装成 turn、刷新后丢失
+
+### Turn Entry（回合条目）
+Story History Entry 的 `turn` 类型。由 TurnOrchestrator 在回合成功提交后追加。包含 entryId、at、input（玩家输入）和 output（主角可见输出）。
 _Avoid_: runner 日志、诊断记录
+
+### Trusted History Committer（受信任历史提交者）
+有权向 committed Story History 追加条目的系统组件。至少包括故事初始化流程（提交 opening entry）和 TurnOrchestrator（提交 turn entry）。Runner / Claude 仍然不得直接修改 committed history。
+_Avoid_: 只允许 TurnOrchestrator 写入、让 Runner 绕过受信任接口直接追加
+
+### Turn Interaction（回合交互状态）
+叙事正文之外的交互元数据，属于受控的玩家可见输出。包含当前回合的交互模式（`continue` 或 `decision`），以及 Decision Point 模式下的当前戏剧问题和 0～4 个建议。存储在 `turn/interaction.json`，与 `turn/output.md`（叙事正文）分离。交互状态属于受控输出，不能从 agent stdout、任意日志或内部状态直接拼装；应被 snapshot/rollback 覆盖；刷新页面后应能恢复。缺失或格式错误时，Issue 10 的 plan 应定义降级行为。
+_Avoid_: 把交互元数据混入叙事正文、从内部日志拼装交互状态、缺失时不降级
+
+### Logical Character Agent（逻辑角色代理）
+MVP 中"角色代理"首先是逻辑角色视角、私有角色状态和独立决策边界，不要求每个 NPC 启动独立进程、独立模型调用或独立 Runner。当前允许一个 Runner 在一个 Story Turn 中读取多个角色的私有状态、分别模拟各角色的目标判断和行为，同时保持角色之间的记忆与信息隔离。不要误解为每个 NPC 必须调用一次 Claude、当前阶段必须实现多 Agent 并行、或 Issue 8 必须拆多个独立运行时。
+_Avoid_: 每个 NPC 独立进程、当前阶段多 Agent 并行、独立模型调用
+
+### Authored Protagonist Runtime（预设主角运行时）
+负责使用 Protagonist Core、稳定第一人称叙述声音、较充分的心理描写、自动生成低风险台词和自然反应、明确主角控制权边界、玩家本回合输入覆盖系统自动表现、重大关系与不可逆决定仍由玩家控制。不包括长期玩家行为推断、evidence/confidence 学习、显式长期偏好持久化或完整反馈 UI。
+_Avoid_: 长期拟合混入运行时、反馈 UI 混入运行时
+
+### Protagonist Feedback & Adaptation（主角反馈与适应）
+负责本次纠正、长期偏好、Confirmed Adjustments、Inferred Tendencies、evidence/confidence、防止单次行为过拟合、明确反馈优先级、区分临时反应/角色关系倾向/稳定人格倾向。属于首个可玩版本后的增强项，不阻塞 MVP 可玩链路。
+_Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 
 ## 架构边界
 
@@ -162,22 +186,29 @@ _Avoid_: runner 日志、诊断记录
 - 失败并回滚的 **Story Turn** 不保留本回合产生的 **Random Log**；只有成功回合的随机判定成为故事状态的一部分。
 - **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数。两者产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
 - **Runner 切换** 决定 **Turn Orchestrator** 持有哪个 **Agent Runner** 实例，但 **Turn Orchestrator** 的生命周期编排逻辑（锁、快照、磁盘权威、回滚）不随 runner 变化。
-- 一个成功提交的 **Story Turn** 产生一条 **History Entry**，追加到 **Turn History**。
-- 失败/回滚的 **Story Turn** 不产生 **History Entry**。
+- 一个成功提交的 **Story Turn** 产生一条 **Turn Entry**，追加到 **Turn History**。
+- 故事初始化流程产生一条 **Opening Entry**，追加到 **Turn History**。
+- 失败/回滚的 **Story Turn** 不产生 **Turn Entry**。
 - **Turn History** 是玩家视角的故事记录，不包含 God State、NPC 私有记忆或内部日志。
+- **Turn History** 由 **Trusted History Committer** 追加；Initializer 提交 opening，TurnOrchestrator 提交 turn。Runner / Claude 不得直接修改。
 - **Claude Code Runner** 读取 **Turn History** 作为玩家已见/已说的上下文，但不得修改或删除 **Turn History**。
 - 一个正常 **Story Turn** 应至少产生一个玩家可感知的 **Meaningful Change**。
-- **Narrative Turn Contract** 约束 **Story Turn** 的叙事逻辑，但不要求拆分新的 Agent Runtime。
+- **Narrative Turn Contract** 约束 **Story Turn** 的叙事逻辑，但不要求拆分新的 Agent Runtime，也不负责 continue/decision 数据结构或交互状态 API。
 - **Character Intent** 可以影响 NPC 可见言行和后续状态，但 **hiddenIntent** 不得直接泄漏到 **Player-visible Output**。
 - **Performance** 渲染的是主角可见、可感知、可合理推断的内容，仍受主角视窗隔离约束。
-- **Adaptive Authored Protagonist** 由 **Protagonist Core**、**Confirmed Adjustments** 和 **Inferred Tendencies** 共同约束。
+- **Adaptive Authored Protagonist** 由 **Authored Protagonist Runtime**（运行时行为）和 **Protagonist Feedback & Adaptation**（长期拟合与反馈）共同实现。
+- **Authored Protagonist Runtime** 使用 **Protagonist Core**、稳定第一人称叙述声音和主角控制权边界，不包括长期拟合。
+- **Protagonist Feedback & Adaptation** 负责 **Confirmed Adjustments**、**Inferred Tendencies** 和 **Explicit Feedback** 的长期持久化与学习，不阻塞 MVP 可玩链路。
 - 主角模型优先级为：玩家本回合明确输入 → **Confirmed Adjustments** → **Protagonist Core** → 高置信 **Inferred Tendencies** → 低置信 **Inferred Tendencies** → 系统默认。
 - **Player Agency** 高于自动演出：系统可以补全低风险表现方式，不能替玩家作关键关系、道德或不可逆决定。
 - **Continuous Performance** 与 **Decision Point** 决定回合结尾形态；两者都不能绕过 **Meaningful Change** 要求。
+- **Decision Point** 与 **Suggestion Gate** 的交互状态由 **Turn Interaction** 承载，与叙事正文（`turn/output.md`）分离。
 - **Suggestion Gate** 只在 **Decision Point** 上提供输入辅助；建议填入输入框但不自动提交，不能移除自由输入。
 - **Protagonist Control Boundary** 划分系统可自动演出与必须交还玩家的行为；系统可补全低风险表现方式，不能替玩家作关键关系、道德或不可逆决定。
 - **Explicit Feedback** 高于系统推测；本次纠正只影响当前生成，长期偏好写入 **Confirmed Adjustments**。
 - **Inner Monologue Guideline** 约束第一人称心理描写：应积极生成具体情绪和思考过程，不能长期停留在模糊中性表达，但不能擅自替玩家完成关键心理结论。
+- **Logical Character Agent** 是 MVP 中角色代理的实现方式：逻辑角色视角和独立决策边界，不要求每个 NPC 独立进程或独立模型调用。
+- **Turn Interaction** 属于受控的玩家可见输出，应被 snapshot/rollback 覆盖；缺失或格式错误时需降级处理，不得从内部日志拼装。
 
 ## 示例对话
 
@@ -185,6 +216,6 @@ _Avoid_: runner 日志、诊断记录
 > **Domain expert:** "这是一次 **Random Judgment**。先用 **Roll Choice** 得到 **Binding Random Outcome**，agent 只能表演这个结果，不能重新选择成功或失败。"
 
 > **Dev:** "玩家刷新页面后看不到之前的回合输出，怎么办？"
-> **Domain expert:** "这需要 **Turn History**。成功回合的 **History Entry** 追加到 `turns/history.jsonl`，前端加载时读取并展示完整历史。"
+> **Domain expert:** "这需要 **Turn History**。成功回合的 **Turn Entry** 追加到 `turns/history.jsonl`，前端加载时读取并展示完整历史。"
 > **Dev:** "那 runner 可以改这个文件吗？"
-> **Domain expert:** "不可以。**Turn History** 只由 **Turn Orchestrator** 追加，runner 只读不改。它是玩家视角的记录，不是 runner 的草稿。"
+> **Domain expert:** "不可以。**Turn History** 只由 **Trusted History Committer** 追加——Initializer 提交 opening，TurnOrchestrator 提交 turn。Runner 只读不改。它是玩家视角的记录，不是 runner 的草稿。"
