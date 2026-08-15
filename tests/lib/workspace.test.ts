@@ -7,6 +7,7 @@ import {
   getStory,
   workspaceExists,
   isValidStoryId,
+  markStoryInitialized,
   readTurnOutput,
   readTurnDone,
   clearTurnDone,
@@ -118,6 +119,58 @@ describe("getStory / workspaceExists", () => {
     expect(await workspaceExists(meta.storyId)).toBe(true);
     expect(await workspaceExists("00000000-0000-4000-8000-000000000000")).toBe(false);
     expect(await workspaceExists("../etc")).toBe(false);
+  });
+});
+
+describe("markStoryInitialized (Issue 7)", () => {
+  it("new story is not initialized", async () => {
+    const meta = await createStory();
+    expect(meta.initialized).toBe(false);
+    expect((await getStory(meta.storyId))?.initialized).toBe(false);
+  });
+
+  it("flips initialized to true and is visible via getStory", async () => {
+    const meta = await createStory({ title: "初始化标记" });
+    await markStoryInitialized(meta.storyId);
+    const after = await getStory(meta.storyId);
+    expect(after?.initialized).toBe(true);
+    // 原有 meta 字段不丢
+    expect(after?.storyId).toBe(meta.storyId);
+    expect(after?.title).toBe("初始化标记");
+    expect(after?.createdAt).toBe(meta.createdAt);
+  });
+
+  it("writes initialized/initializedAt into frontmatter and preserves body", async () => {
+    const meta = await createStory({ title: "正文保留" });
+    await markStoryInitialized(meta.storyId);
+    const raw = await fs.readFile(path.join(root, meta.storyId, "story.md"), "utf8");
+    expect(raw).toContain("initialized: true");
+    expect(raw).toMatch(/^initializedAt: \d{4}-\d{2}-\d{2}T/m);
+    // frontmatter 原键保留、正文占位保留
+    expect(raw).toContain(`id: ${meta.storyId}`);
+    expect(raw).toContain("title: 正文保留");
+    expect(raw).toContain("# 故事");
+    expect(raw.startsWith("---\n")).toBe(true);
+  });
+
+  it("is idempotent: re-mark does not duplicate keys", async () => {
+    const meta = await createStory();
+    await markStoryInitialized(meta.storyId);
+    await markStoryInitialized(meta.storyId);
+    const raw = await fs.readFile(path.join(root, meta.storyId, "story.md"), "utf8");
+    const frontmatter = raw.split("---")[1];
+    expect(frontmatter.match(/^initialized: /gm)?.length).toBe(1);
+    expect(frontmatter.match(/^initializedAt: /gm)?.length).toBe(1);
+  });
+
+  it("throws for invalid storyId", async () => {
+    await expect(markStoryInitialized("not-a-uuid")).rejects.toThrow("invalid storyId");
+  });
+
+  it("throws when story.md is missing", async () => {
+    const meta = await createStory();
+    await fs.rm(path.join(root, meta.storyId), { recursive: true });
+    await expect(markStoryInitialized(meta.storyId)).rejects.toThrow();
   });
 });
 

@@ -9,6 +9,8 @@ export interface StoryMeta {
   storyId: string;
   title: string;
   createdAt: string;
+  /** Issue 7：初始化 agent 提交后由 Web 侧写 frontmatter，agent 无权写 story.md */
+  initialized: boolean;
 }
 
 export interface DoneMarker {
@@ -72,7 +74,7 @@ export async function createStory(opts?: { title?: string }): Promise<StoryMeta>
   await fs.writeFile(path.join(dir, "turn", "output.md"), TURN_OUTPUT_PLACEHOLDER);
   await fs.writeFile(path.join(dir, "turns", "history.jsonl"), ""); // Issue 6.5
 
-  return { storyId, title, createdAt };
+  return { storyId, title, createdAt, initialized: false };
 }
 
 export async function listStories(): Promise<StoryMeta[]> {
@@ -169,7 +171,26 @@ function parseStoryMd(raw: string): StoryMeta | null {
     map[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
   }
   if (!map.id || !map.title || !map.createdAt) return null;
-  return { storyId: map.id, title: map.title, createdAt: map.createdAt };
+  return { storyId: map.id, title: map.title, createdAt: map.createdAt, initialized: map.initialized === "true" };
+}
+
+/**
+ * Issue 7：把 story.md frontmatter 标记为已初始化（Web 侧权威，agent 无权写 story.md）。
+ * 保留其余 frontmatter 键与正文，只追加/覆盖 initialized 与 initializedAt。
+ * 调用方（TurnOrchestrator 提交阶段）失败时整体回滚，不会留下"已标记但未提交"状态。
+ */
+export async function markStoryInitialized(storyId: string): Promise<void> {
+  if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
+  const file = path.join(resolveWorkspaceDir(storyId), "story.md");
+  const raw = await fs.readFile(file, "utf8");
+  const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!m) throw new Error("story.md frontmatter missing or malformed");
+
+  const lines = m[1].split("\n").filter((line) => line.split(":", 1)[0].trim() !== "initialized" && line.split(":", 1)[0].trim() !== "initializedAt");
+  lines.push(`initialized: true`);
+  lines.push(`initializedAt: ${new Date().toISOString()}`);
+
+  await fs.writeFile(file, `---\n${lines.join("\n")}\n---\n${m[2]}`);
 }
 
 const RULES_MD = `# 规则\n\n（占位：故事运行规则。后续初始化 agent 填充，例如判定风格与随机权重约定。）\n`;
