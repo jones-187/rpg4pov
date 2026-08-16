@@ -142,7 +142,8 @@ Issue 3 引入的验证用 Agent Runner 实现。不接入真实大模型，读�
 
 ### Claude Code Runner（Claude Code 运行器）
 Issue 6 引入的首个真实 Agent Runner 实现。通过冷启动 `claude` CLI 子进程在 Story Workspace 内执行一个回合，让 CLI 自主读 workspace 文件、按 prompt 指令写 `turn/output.md` 与 `turn/done.json`。是 MVP 验证用运行时，非永久产品运行时——arch-prd 明确 Claude Code Runner 是 validation runtime，未来可替换为 Custom Story Agent Runner、SDK Runner 或 HTTP Agent Service Runner。
-_Avoid_: 永久 agent、产品运行时、会话型 agent
+_Issue 14 起权限模式_：`--permission-mode default` + 受控 settings.json——allow 列表为真白名单（未匹配调用一律拒绝），`turns/**`/`story.md`/`turn/input.md` 等受保护路径以相对+绝对双形态 deny；此前 auto 模式会自动放行一切未被 deny 的调用（实测被用于绕写 committed history）。committed history 的最终保障是 orchestrator 守卫（见 Trusted History Committer），权限层只是纵深防御。
+_Avoid_: 永久 agent、产品运行时、会话型 agent、auto 权限模式回归、以权限层替代 orchestrator invariant
 
 ### Runner 切换（Runner Selection）
 Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `claude`），默认 `fake`。Issue 7 起单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用 `claude`，避免无 `ANTHROPIC_API_KEY` 时普通开发跑不起来；启用 `claude` 经 env 覆盖或额外 compose 文件完成。vitest 契约测试始终用 `fake`，不依赖真实 CLI/凭证/网络。
@@ -204,6 +205,7 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 
 - **`workspace.ts` 是 Web / API / Turn Orchestrator 侧访问 Story Workspace 的统一入口。** 该侧代码（路由、orchestrator）读写 workspace 文件时，必须经由 workspace.ts 暴露的函数，不应直接使用 fs 操作 workspace 路径。
 - **AgentRunner 不受此限制。** Runner 拿到传入的 `workspaceDir` 绝对路径后，可在该目录内直接用 fs 读写文件（如写 `turn/output.md`、`turn/done.json`）。这是有意设计，不是对 Issue 1-2 "workspace.ts 唯一磁盘入口" 不变量的破坏——该不变量只约束 Web/API/Orchestrator 侧。
+- **`turn-history.ts` 是 Web 侧的既定例外**：作为 Turn History 的领域模块自带 fs 读写（append/read/raw-read）。它与 workspace.ts 并列，而非经由 workspace.ts——历史上如此（Issue 6.5），Issue 14 的隔离守卫（`readTurnHistoryRaw` 基准比对）也落在此模块。新增 Web 侧 workspace 文件访问时仍应优先经 workspace.ts，不要再开新例外。
 - **理由**：Runner 天然需要写多个 workspace 文件（output、done，以及未来真实 agent 写 world/player 等），为每个文件在 workspace.ts 加包装函数是过度封装；未来真实 agent（Claude Code CLI）作为子进程也是直接操作文件，不会经过 workspace.ts。
 - **后续约束**：Issue 4 在此边界内引入快照/回滚时，快照与回滚由 Orchestrator 通过 workspace.ts 统一编排；Runner 仍只负责在 workspaceDir 内写自己的产物。
 

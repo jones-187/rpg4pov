@@ -855,7 +855,9 @@ Issue 9      ← Adaptive Authored Protagonist Runtime（MVP 必需）
 Issue 9.5    ← Adaptive Protagonist Feedback & Adaptation（MVP 必需，完整 AAP 验收的一部分）
 Issue 10
 Issue 12     ← 依赖 Issue 9/9.5/10
-Issue 11     ← 依赖 5/6.5/7/8/9/9.5/10/12（与条目头部 Blocked by 一致；5、6.5 经 7 传递）
+Issue 13     ← 情感连续性与关系状态（依赖 Issue 8/9；已通过真实模型验收）
+Issue 14     ← committed history 提交权隔离 + 验收后 polish（依赖 Issue 12/13）
+Issue 11     ← 依赖 5/6.5/7/8/9/9.5/10/12/14（与条目头部 Blocked by 一致；5、6.5 经 7 传递）
 ```
 
 ## 依赖关系简图
@@ -882,13 +884,17 @@ Issue 11     ← 依赖 5/6.5/7/8/9/9.5/10/12（与条目头部 Blocked by 一�
 9.5. Feedback & Adaptation（显式反馈 + 长期偏好 + 推测倾向）
    ↓                ↘
 10. Decision Points & Input Guidance（交互控制 + Turn Interaction）
-   ↓
-12. 输出隔离强化（≥ Issue 9/9.5/10）
+   ↓                ↘
+12. 输出隔离强化（≥ Issue 9/9.5/10）   13. 情感连续性与关系状态（≥ Issue 8/9）
+   ↓                                     ↓
+14. committed history 提交权隔离（≥ Issue 12；含 13 验收后 polish）
                      ↓
-                  11. 最小真实可玩链路（≥ Issue 5/6.5/7/8/9/9.5/10/12，与条目头部 Blocked by 一致）
+                  11. 最小真实可玩链路（≥ Issue 5/6.5/7/8/9/9.5/10/12/14，与条目头部 Blocked by 一致）
 ```
 
 `12. 输出隔离强化` 至少依赖 Issue 4、Issue 9、Issue 9.5 和 Issue 10，必须在 Issue 11 之前完成。
+`13. 情感连续性与关系状态` 依赖 Issue 8（Character Intent 基础）与 Issue 9（主角运行时）；已通过真实模型行为验收（`docs/acceptance/`）。
+`14. committed history 提交权隔离` 依赖 Issue 12（输出隔离基线），吸收 Issue 13 真实验收发现的 P1；必须在 Issue 11 之前完成。
 `9.5. Adaptive Protagonist Feedback & Adaptation` 属于完整 Adaptive Authored Protagonist 验收的一部分，因其依赖 Issue 9，可在 Issue 10 之前完成，也可与 Issue 10 并行收敛，但不能晚于 Issue 11。
 `6.5. Player-visible Turn History` 依赖 Issue 6，必须在 Issue 7 之前（初始化 agent 和后续叙事回合都需要读取历史）。
 Issue 7 的 opening entry 通过受信任的系统提交者（Initializer）写入，不需要伪造玩家输入。

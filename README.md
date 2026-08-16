@@ -2,7 +2,7 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**Issue 7-10、9.5 与 Issue 12 已实现并完成本机验证；真实环境链路验收完成（WSL Docker + NewAPI 网关 + claude CLI 2.1.140：init/turn/continue/决策点建议全链路跑通，输出隔离哨兵检查通过）**。剩余为长线主观体验类验收（叙事质量稳定性）。
+当前仓库状态：**Issue 7-10、9.5、12 已实现并完成本机验证；Issue 13（NPC 情感连续性与关系状态）已实现并通过真实模型行为验收（2026-08-16，qwen-fp8 四故事 69 回合，结论"基本通过"——记录见 `docs/acceptance/`）；Issue 14（committed history 提交权隔离 + 三项验收后 polish）已实现**。真实环境链路验收完成（WSL Docker + NewAPI 网关 + claude CLI 2.1.140：init/turn/continue/决策点建议全链路跑通，输出隔离哨兵检查通过）。剩余：Issue 14 权限层的 Docker 真实链路复验（网关令牌失效未跑完，见 issue.md Issue 14 遗留）与长线叙事质量观察。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）；committed 玩家历史 exclusively 由 orchestrator 提交——agent 执行期间对 `turns/history.jsonl` 的任何改动都会被逐字比对拦截并整轮回滚，工具权限经 `--permission-mode default` 白名单收紧（Issue 14）。
 回合 prompt 已包含 Narrative Turn Contract（有效变化、NPC 意图、视觉小说式表演）、主角运行时控制权边界与心理描写规则、玩家反馈与长期适应（`adjustments.md` / `tendencies.md`）；回合交互状态（连续演出 / 决策点 + 0-4 条建议）经 `turn/interaction.json` 净化后返回，UI 提供"继续"按钮与建议填入。
