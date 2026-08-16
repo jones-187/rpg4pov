@@ -21,6 +21,7 @@ describe("diagnostics", () => {
   });
 
   it("redactSecrets 脱敏 ANTHROPIC_AUTH_TOKEN（第三方 API 兼容）", () => {
+    // 夹具是编造的占位 token（48 个 0），不是任何真实密钥
     const input = "error: ANTHROPIC_AUTH_TOKEN=sk-000000000000000000000000000000000000000000000000 call failed";
     expect(redactSecrets(input)).toBe("error: ANTHROPIC_AUTH_TOKEN=[REDACTED] call failed");
   });
