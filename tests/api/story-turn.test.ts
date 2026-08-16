@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { POST } from "@/app/api/story-turn/route";
-import { createStory, readTurnOutput, resolveWorkspaceRoot } from "@/lib/workspace";
+import { createStory, markStoryInitialized, readTurnOutput, resolveWorkspaceRoot } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -19,8 +19,10 @@ function req(body: unknown): Request {
   });
 }
 
+/** Issue 7 起 turn 前置条件：故事必须已初始化（route 层守卫） */
 async function freshStory(): Promise<string> {
   const meta = await createStory({ title: "turn 测试" });
+  await markStoryInitialized(meta.storyId);
   return meta.storyId;
 }
 
@@ -145,5 +147,15 @@ describe("POST /api/story-turn (Issue 6.5: returns committed turn)", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.turn).toBeUndefined();
+  });
+});
+
+describe("POST /api/story-turn (Issue 7: init-before-turn guard)", () => {
+  it("returns 400 story not initialized when story has no init committed", async () => {
+    const meta = await createStory({ title: "未初始化" });
+    const res = await POST(req({ storyId: meta.storyId, input: "推开木门" }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("story not initialized");
   });
 });

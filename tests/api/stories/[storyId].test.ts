@@ -1,7 +1,7 @@
 // tests/api/stories/[storyId].test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { GET } from "@/app/api/stories/[storyId]/route";
-import { createStory } from "@/lib/workspace";
+import { createStory, markStoryInitialized } from "@/lib/workspace";
 import { appendTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../../helpers/workspace-env";
 
@@ -26,6 +26,19 @@ describe("GET /api/stories/[storyId]", () => {
     expect(json.story.storyId).toBe(meta.storyId);
     expect(json.story.title).toBe("空故事");
     expect(json.history).toEqual([]);
+    // Issue 7：新建故事未初始化，前端据此显示初始化表单
+    expect(json.story.initialized).toBe(false);
+  });
+
+  it("returns initialized=true after markStoryInitialized (Issue 7)", async () => {
+    const meta = await createStory({ title: "已初始化故事" });
+    await markStoryInitialized(meta.storyId);
+    const res = await GET(makeRequest(meta.storyId), {
+      params: Promise.resolve({ storyId: meta.storyId }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.story.initialized).toBe(true);
   });
 
   it("returns story meta with history entries", async () => {

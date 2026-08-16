@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isValidStoryId, workspaceExists } from "@/lib/workspace";
+import { isValidStoryId, getStory, workspaceExists } from "@/lib/workspace";
 import { TurnBusyError } from "@/lib/turn-orchestrator";
 import { orchestrator } from "@/lib/runner-selection";
 
@@ -23,6 +23,13 @@ export async function POST(request: Request) {
 
   if (!(await workspaceExists(storyId))) {
     return NextResponse.json({ error: "story not found" }, { status: 404 });
+  }
+
+  // Issue 7：状态机守卫——create → init → turn。未初始化的故事拒绝回合。
+  // 守卫在 route 层而非 orchestrator：orchestrator 保持通用 agent 执行机制。
+  const story = await getStory(storyId);
+  if (!story?.initialized) {
+    return NextResponse.json({ error: "story not initialized" }, { status: 400 });
   }
 
   // Issue 4：串行锁拒绝 → 409（无 retryInput，用户输入还在前端输入框）。
