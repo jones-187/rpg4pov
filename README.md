@@ -55,6 +55,8 @@ ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
+Anthropic 协议兼容网关同样可用（实测：NewAPI 网关 + Qwen 模型，`ANTHROPIC_BASE_URL` 填网关根地址、`ANTHROPIC_MODEL` 填网关内的模型名）。注意镜像内 claude CLI 锁定 **2.1.140**：v2.1.142+ 会把 system 消息放进 messages 数组非开头位置，部分第三方网关（new-api 等）会返回 400 "System message must be at the beginning"，官方 API 不受影响。
+
 2. 使用 claude compose 覆盖文件启动：
 
 ```bash

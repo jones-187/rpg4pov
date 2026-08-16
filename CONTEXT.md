@@ -20,7 +20,7 @@ _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状�
 
 ### Player-visible Output（主角可见输出）
 回合完成后，用户能通过 Web 界面看到的内容。**只来自 `turn/output.md`**，不包含 agent stdout、内部日志、God State、NPC 私有记忆或随机判定日志。
-格式契约（Issue 12 起 orchestrator 强制校验，`src/lib/turn-output.ts`）：首行必须是 `# 主角视窗` 标题；长度失控、正文为 JSON 转储、逐字包含 random log 行都判"明显不合规"，回合失败回滚。语义级泄漏审查是 P1，不在此层。
+格式契约（Issue 12 起 orchestrator 强制校验，`src/lib/turn-output.ts`）：首行必须是 `# 主角视窗` 标题；长度失控、正文为 JSON 转储、逐字包含 random log 行或 interaction.json 原文都判"明显不合规"，回合失败回滚。语义级泄漏审查是 P1，不在此层。
 
 ## 叙事与主角相关
 
@@ -61,7 +61,7 @@ _Avoid_: 单次行为定型、把临时反应升级为稳定人格、偷偷把�
 _Avoid_: 替玩家告白、替玩家原谅、替玩家背叛、替玩家关闭重要选择
 
 ### Continuous Performance（连续演出）
-当事件尚未到达真正需要玩家决定的位置时，系统继续推进当前人物和事件。可以继续 NPC 对话、主角心理活动、低风险自然反应和事件发展；玩家仍可自由输入打断。“继续”是系统级控制，不是主角台词或故事内行动。
+当事件尚未到达真正需要玩家决定的位置时，系统继续推进当前人物和事件。可以继续 NPC 对话、主角心理活动、低风险自然反应和事件发展；玩家仍可自由输入打断。”继续”是系统级控制，不是主角台词或故事内行动。实现落点（Issue 10）：前端”继续”按钮发送 `POST /api/story-turn {command:”continue”}`（无需 input；同时提供 input 时按普通回合处理），runner 收到的是系统指令文本（写入 turn/input.md），玩家可见历史中该回合 input 记录固定标签「（继续）」。每次继续仍需产生有效变化或推进至决策点。
 _Avoid_: 每小段都强制输入、无限无意义扩写、把继续当角色行动
 
 ### Decision Point（决策点）
@@ -165,8 +165,8 @@ _Avoid_: runner 日志、诊断记录
 _Avoid_: 只允许 TurnOrchestrator 写入、让 Runner 绕过受信任接口直接追加
 
 ### Turn Interaction（回合交互状态）
-叙事正文之外的交互元数据，属于受控的玩家可见输出。包含当前回合的交互模式（`continue` 或 `decision`），以及 Decision Point 模式下的当前戏剧问题和 0～4 个建议。存储在 `turn/interaction.json`，与 `turn/output.md`（叙事正文）分离。交互状态属于受控输出，不能从 agent stdout、任意日志或内部状态直接拼装；应被 snapshot/rollback 覆盖；刷新页面后应能恢复。缺失或格式错误时，Issue 10 的 plan 应定义降级行为。
-_Avoid_: 把交互元数据混入叙事正文、从内部日志拼装交互状态、缺失时不降级
+叙事正文之外的交互元数据，属于受控的玩家可见输出。包含当前回合的交互模式（`continue` 或 `decision`），以及 Decision Point 模式下的 0～4 个建议。存储在 `turn/interaction.json`，与 `turn/output.md`（叙事正文）分离，由回合 agent 在写 done 前写入。Web 侧唯一出口是 `sanitizeTurnInteraction`（`src/lib/interaction-schema.ts`，客户端与服务端共用）：mode 非法降级、建议逐条过滤（非字符串/空/超长丢弃）、超 4 条截断、额外字段一律丢弃；文件缺失、JSON 非法或结构不合法整体降级为默认连续演出态（`continue`、无建议）。interaction.json 原文逐字出现在 output.md 中视为内部状态外泄，回合失败回滚。受 snapshot/rollback 覆盖，刷新后经 GET story 恢复。
+_Avoid_: 把交互元数据混入叙事正文、从内部日志拼装交互状态、在 route/前端各自实现净化规则、超 4 条建议导致决策点整体退化为继续
 
 ### Logical Character Agent（逻辑角色代理）
 MVP 中"角色代理"首先是逻辑角色视角、私有角色状态和独立决策边界，不要求每个 NPC 启动独立进程、独立模型调用或独立 Runner。当前允许一个 Runner 在一个 Story Turn 中读取多个角色的私有状态、分别模拟各角色的目标判断和行为，同时保持角色之间的记忆与信息隔离。不要误解为每个 NPC 必须调用一次 Claude、当前阶段必须实现多 Agent 并行、或 Issue 8 必须拆多个独立运行时。
@@ -222,7 +222,7 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 - **Explicit Feedback** 高于系统推测；本次纠正只影响当前生成，长期偏好写入 **Confirmed Adjustments**。
 - **Inner Monologue Guideline** 约束第一人称心理描写：应积极生成具体情绪和思考过程，不能长期停留在模糊中性表达，但不能擅自替玩家完成关键心理结论。
 - **Logical Character Agent** 是 MVP 中角色代理的实现方式：逻辑角色视角和独立决策边界，不要求每个 NPC 独立进程或独立模型调用。
-- **Turn Interaction** 属于受控的玩家可见输出，应被 snapshot/rollback 覆盖；缺失或格式错误时需降级处理，不得从内部日志拼装。
+- **Turn Interaction** 属于受控的玩家可见输出，被 snapshot/rollback 覆盖；缺失或格式错误时经 `sanitizeTurnInteraction` 降级为默认连续演出态，不从内部日志拼装。
 
 ## 示例对话
 

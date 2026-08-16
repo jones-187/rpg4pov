@@ -28,6 +28,7 @@
 **Type**: AFK
 **Blocked by**: Issue 1
 **User stories covered**: 技术架构 PRD US 8-10, 28-35, 49-54
+**Status**: 实现 + 测试完成（workspace.ts 领域层；后续 issue 持续回归）
 
 **目标行为**：用户创建一个新故事，系统生成 storyId，并创建该 storyId 对应的 Markdown-first Story Workspace。页面进入该 storyId 的故事页。不同 storyId 的 workspace 互相隔离。
 
@@ -40,6 +41,7 @@
 **Type**: AFK
 **Blocked by**: Issue 2
 **User stories covered**: 技术架构 PRD US 21-25, 28-38, 61-63
+**Status**: 实现 + 测试完成（AgentRunner 接口 + FakeAgentRunner；架构闭环沿用至今）
 
 **目标行为**：用户在故事页输入内容，系统把输入写入当前 Story Workspace，然后通过 Agent Runtime Adapter 调用 Fake Agent Runner。Fake Agent 写入固定主角可见输出，后端只读取固定输出并返回页面。
 
