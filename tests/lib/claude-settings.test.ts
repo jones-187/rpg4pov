@@ -25,6 +25,32 @@ describe("claude-settings", () => {
     expect(bashRules).toEqual(["Bash(node /app/cli/roll-choice.js:*)"]);
   });
 
+  // --- Issue 14：committed history 隔离（turns/** 对写工具双形态封锁） ---
+
+  it("settings deny 封锁 turns/** 的 Write 与 Edit（相对形态）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    const deny = parsed.permissions.deny as string[];
+    expect(deny).toContain("Write(./turns/**)");
+    expect(deny).toContain("Edit(./turns/**)");
+  });
+
+  it("settings deny 封锁 turns/** 的容器绝对路径形态（deny 优先于宽 allow）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    const deny = parsed.permissions.deny as string[];
+    expect(deny).toContain("Write(/app/data/workspaces/*/turns/**)");
+    expect(deny).toContain("Edit(/app/data/workspaces/*/turns/**)");
+  });
+
+  it("settings allow 提供绝对路径写入面（真实 agent Write 调用 375/377 为绝对路径）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    const allow = parsed.permissions.allow as string[];
+    expect(allow).toContain("Write(/app/data/workspaces/**)");
+    expect(allow).toContain("Edit(/app/data/workspaces/**)");
+    // 宽 allow 不得绕过 turns deny：deny 列表必须存在对应封锁
+    const deny = parsed.permissions.deny as string[];
+    expect(deny.some((r) => r.startsWith("Write(/app/data/workspaces/*/turns"))).toBe(true);
+  });
+
   it("settings allow 含 Read/Write workspace 文件", () => {
     const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
     const allow = parsed.permissions.allow as string[];

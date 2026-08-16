@@ -22,6 +22,26 @@ function resolveHistoryPath(storyId: string): string {
 }
 
 /**
+ * 读取 turns/history.jsonl 的原始字节内容（Issue 14 history 隔离守卫）。
+ * 返回 null 表示文件不存在。用于回合前后逐字比对——append/rewrite/truncate/
+ * 伪造条目都会造成内容差异，比行数比较更强。
+ * Web 侧经 workspace.ts 之外的唯一例外：本模块本就是 history 的领域模块。
+ */
+export async function readTurnHistoryRaw(storyId: string): Promise<string | null> {
+  if (!isValidStoryId(storyId)) {
+    throw new Error("invalid storyId");
+  }
+  try {
+    return await fs.readFile(resolveHistoryPath(storyId), "utf8");
+  } catch (err) {
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
  * 追加一条 history entry 到 turns/history.jsonl。
  * 每条 entry 占一行（JSONL 格式）。
  * 自动创建 turns/ 目录（兼容旧 workspace）。

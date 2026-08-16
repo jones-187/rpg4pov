@@ -20,7 +20,7 @@ import {
   readWorkspaceUnsafeMarker,
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
-import { appendTurnHistory, type TurnHistoryEntry } from "./turn-history";
+import { appendTurnHistory, readTurnHistoryRaw, type TurnHistoryEntry } from "./turn-history";
 import {
   readTurnInteraction,
   readTurnInteractionRawLine,
@@ -118,6 +118,10 @@ export class TurnOrchestrator {
     // 2. 快照（lock 后第一步）——捕获"本回合开始前的完整提交态"（含上回合 done.json）。
     await createSnapshot(storyId);
 
+    // 2.5 Issue 14：committed history 隔离基准——回合开始时的 turns/history.jsonl 原文。
+    //     Agent 运行期间该文件必须保持逐字不变；正式 append 前会与基准比对。
+    const historyBaseline = await readTurnHistoryRaw(storyId);
+
     // 3. clearTurnDone 是本回合第一个 mutation，必须在 snapshot 之后。
     await clearTurnDone(storyId);
 
@@ -183,6 +187,21 @@ export class TurnOrchestrator {
       if (problem) {
         return await this.failTurn(storyId, problem, playerInput);
       }
+    }
+
+    // 8.7 Issue 14：committed history 隔离守卫。Agent 只生成候选内容，
+    //     player-visible timeline 的 commit 权 exclusively 属于 orchestrator——
+    //     逐字比对（非行数），append/rewrite/truncate/伪造条目一律拦截。
+    //     必须发生在 orchestrator 自己 append 之前，否则会误判自己的合法写入。
+    //     检出污染即整轮回滚（restore snapshot 恢复回合前 history），fail closed，
+    //     不做"修复那一行再继续"——越过 ownership 边界后本轮状态不可信。
+    const historyAfter = await readTurnHistoryRaw(storyId);
+    if (historyAfter !== historyBaseline) {
+      return await this.failTurn(
+        storyId,
+        "committed history mutated during turn",
+        playerInput,
+      );
     }
 
     // 9. 成功：append history → 删除快照 → 返回 committed entry

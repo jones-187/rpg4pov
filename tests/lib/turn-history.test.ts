@@ -5,9 +5,10 @@ import path from "node:path";
 import {
   appendTurnHistory,
   readTurnHistory,
+  readTurnHistoryRaw,
   type TurnHistoryEntry,
 } from "@/lib/turn-history";
-import { createStory, resolveWorkspaceRoot } from "@/lib/workspace";
+import { createStory, resolveWorkspaceDir, resolveWorkspaceRoot } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -143,5 +144,30 @@ describe("turn-history", () => {
 
       await expect(readTurnHistory(meta.storyId)).rejects.toThrow();
     });
+  });
+});
+// --- Issue 14：原始内容读取（history 隔离守卫的比对基础） ---
+
+describe("readTurnHistoryRaw (Issue 14)", () => {
+  it("返回文件原始内容（含空串），供回合前后逐字比对", async () => {
+    const meta = await createStory();
+    // createStory 写入空文件——空串而非 null
+    expect(await readTurnHistoryRaw(meta.storyId)).toBe("");
+    await appendTurnHistory(meta.storyId, {
+      turnId: "44444444-4444-4444-8444-444444444444",
+      at: "2026-08-16T00:00:00.000Z",
+      input: "输入",
+      output: "输出",
+    });
+    const raw = await readTurnHistoryRaw(meta.storyId);
+    expect(raw).not.toBeNull();
+    expect(raw!).toContain("44444444");
+    expect(raw!.endsWith("\n")).toBe(true);
+  });
+
+  it("文件不存在时返回 null（与空文件区分，agent 新建文件也会被比对拦截）", async () => {
+    const meta = await createStory();
+    await fs.rm(path.join(resolveWorkspaceDir(meta.storyId), "turns", "history.jsonl"));
+    expect(await readTurnHistoryRaw(meta.storyId)).toBeNull();
   });
 });

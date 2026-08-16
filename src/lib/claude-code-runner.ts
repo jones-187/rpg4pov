@@ -127,11 +127,14 @@ export class ClaudeCodeRunner implements AgentRunner {
         "-p", // 非交互模式，从 stdin 读取 prompt
         "--output-format",
         "json",
-        // 权限通过 --settings + --permission-mode auto 控制：
-        // - settings.json 定义 permissions.allow/deny 规则（路径级精细控制）
-        // - --permission-mode auto 使 settings 中的 allow 规则自动放行，无需人工确认
+        // 权限通过 --settings + --permission-mode default 控制（Issue 14 收紧）：
+        // - settings.json 的 allow 列表在 default 模式下是真白名单——未匹配的
+        //   调用（含任意 Bash）一律拒绝；非交互 -p 无法弹权限请求。
+        //   此前 auto 模式会自动放行一切未被 deny 的调用，实测 qwen-fp8 曾借
+        //   任意 Bash 直接写 committed history（Issue 14 验收事故）。
+        // - deny 优先于 allow：turns/** 的 committed history 对写工具双形态封锁。
         "--permission-mode",
-        "auto",
+        "default",
         "--settings",
         CLAUDE_SETTINGS_PATH,
       ];

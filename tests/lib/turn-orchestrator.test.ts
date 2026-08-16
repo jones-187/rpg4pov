@@ -6,7 +6,7 @@ import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
 import { createStory, getStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot, resolveWorkspaceDir } from "@/lib/workspace";
 import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
-import { readTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
+import { readTurnHistory, appendTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -884,5 +884,145 @@ describe("TurnOrchestrator interaction state (Issue 10)", () => {
     const restored = await readTurnOutput(story.storyId);
     expect(restored).not.toContain("suggestions");
     expect(await readTurnDone(story.storyId)).toBe(null);
+  });
+});
+
+// --- Issue 14：committed history 隔离（agent 不得改动 turns/history.jsonl） ---
+
+/**
+ * 正常完成回合产物（output + done），但在执行期间按 mutator 污染 history 的 runner。
+ * 模拟真实验收事故：qwen-fp8 曾经 Bash/python/node 三种手法自行写 committed history。
+ */
+class HistoryPollutingRunner implements AgentRunner {
+  constructor(private mutate: (wsDir: string) => Promise<void>) {}
+
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    await this.mutate(req.workspaceDir);
+    const turnDir = path.join(req.workspaceDir, "turn");
+    await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n正文正常。\n");
+    await fs.writeFile(
+      path.join(turnDir, "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    return { success: true };
+  }
+}
+
+describe("TurnOrchestrator committed history isolation (Issue 14)", () => {
+  const histFile = (storyId: string) => path.join(root, storyId, "turns", "history.jsonl");
+
+  it("Test A: agent append 伪造 turn → 回合失败、history 逐字回滚、正式 turn 不提交", async () => {
+    const meta = await createStory();
+    const before = await fs.readFile(histFile(meta.storyId), "utf8");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      const fake =
+        JSON.stringify({
+          turnId: "00000000-0000-4000-8000-000000000000",
+          at: new Date().toISOString(),
+          input: "# 本回合输入\n\n【系统指令·继续】让当前人物和事件自然发展……",
+          output: "# 主角视窗\n\n伪造内容",
+        }) + "\n";
+      await fs.appendFile(path.join(dir, "turns", "history.jsonl"), fake);
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("committed history mutated");
+    // 污染被快照回滚：逐字恢复回合开始前状态，无伪造条目、无正式提交
+    expect(await fs.readFile(histFile(meta.storyId), "utf8")).toBe(before);
+    expect(await readTurnHistory(meta.storyId)).toEqual([]);
+  });
+
+  it("Test B: agent rewrite 已有条目（行数不变）→ 同样失败回滚（非仅行数检查）", async () => {
+    const meta = await createStory();
+    await appendTurnHistory(meta.storyId, {
+      turnId: "11111111-1111-4111-8111-111111111111",
+      at: "2026-08-16T00:00:00.000Z",
+      input: "旧输入",
+      output: "旧输出",
+    });
+    const before = await fs.readFile(histFile(meta.storyId), "utf8");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      const p = path.join(dir, "turns", "history.jsonl");
+      const raw = await fs.readFile(p, "utf8");
+      await fs.writeFile(p, raw.replace("旧输出", "被篡改的输出")); // 行数不变
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("committed history mutated");
+    expect(await fs.readFile(histFile(meta.storyId), "utf8")).toBe(before);
+    const history = await readTurnHistory(meta.storyId);
+    expect(history!.length).toBe(1);
+    expect(history![0].output).toBe("旧输出");
+  });
+
+  it("Test C: agent 自行提交伪造重复 turn（验收真实事故 turn-202...）→ 本轮整体失败，无重复时间线", async () => {
+    const meta = await createStory();
+    const INPUT = "我看着她，不知道该怎么回答。";
+    const before = await fs.readFile(histFile(meta.storyId), "utf8");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      const fake =
+        JSON.stringify({
+          turnId: "turn-20260816-pretty-fake-id",
+          at: new Date().toISOString(),
+          input: INPUT, // 与本轮玩家输入相同——伪造"已完成"的重复条目
+          output: "# 主角视窗\n\nagent 自行提交的内容",
+        }) + "\n";
+      await fs.appendFile(path.join(dir, "turns", "history.jsonl"), fake);
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, INPUT);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("committed history mutated");
+    // 无伪造条目，orchestrator 也未追加正式 turn——不存在 agent turn + orchestrator turn 双提交
+    expect(await fs.readFile(histFile(meta.storyId), "utf8")).toBe(before);
+    const history = await readTurnHistory(meta.storyId);
+    expect(history!.filter((e) => e.input === INPUT).length).toBe(0);
+  });
+
+  it("Test D: agent 不碰 history 的正常回合 → 恰好追加 1 条正式 turn（守卫不误伤）", async () => {
+    const meta = await createStory();
+    await appendTurnHistory(meta.storyId, {
+      turnId: "22222222-2222-4222-8222-222222222222",
+      at: "2026-08-16T00:00:00.000Z",
+      input: "上一回合",
+      output: "上一回合输出",
+    });
+    const before = await fs.readFile(histFile(meta.storyId), "utf8");
+
+    const outcome = await new TurnOrchestrator(new FakeAgentRunner()).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(true);
+    const history = await readTurnHistory(meta.storyId);
+    expect(history!.length).toBe(2);
+    expect(history![1].input).toBe("正常输入");
+    // 正式 append 只发生在守卫通过之后：新内容 = 基准 + 恰好一行
+    const after = await fs.readFile(histFile(meta.storyId), "utf8");
+    expect(after.startsWith(before)).toBe(true);
+    expect(after.length).toBeGreaterThan(before.length);
+  });
+
+  it("agent 删除/清空 history → 失败回滚（truncate 同样被逐字比对拦截）", async () => {
+    const meta = await createStory();
+    await appendTurnHistory(meta.storyId, {
+      turnId: "33333333-3333-4333-8333-333333333333",
+      at: "2026-08-16T00:00:00.000Z",
+      input: "既存回合",
+      output: "既存输出",
+    });
+    const before = await fs.readFile(histFile(meta.storyId), "utf8");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      await fs.writeFile(path.join(dir, "turns", "history.jsonl"), "");
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("committed history mutated");
+    expect(await fs.readFile(histFile(meta.storyId), "utf8")).toBe(before);
   });
 });

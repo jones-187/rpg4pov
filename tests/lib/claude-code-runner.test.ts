@@ -138,10 +138,12 @@ describe("ClaudeCodeRunner", () => {
     expect(args.some((a) => a.includes("推开木门"))).toBe(false);
     // args 不含 prompt 文件路径（不再使用临时文件）
     expect(args.some((a) => a.includes("claude-prompts"))).toBe(false);
-    // args 含 --settings 和 --permission-mode
+    // args 含 --settings 和 --permission-mode（Issue 14：default 白名单模式，
+    // 取代会自动放行任意 Bash 的 auto 模式）
     expect(args).toContain("--settings");
     expect(args).toContain("--permission-mode");
-    expect(args).toContain("auto");
+    expect(args).toContain("default");
+    expect(args).not.toContain("auto");
   });
 
   it("stdinData 包含完整 prompt：playerInput、workspace 指令、history.jsonl 指令", async () => {
