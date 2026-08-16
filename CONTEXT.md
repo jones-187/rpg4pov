@@ -7,6 +7,17 @@
 ### Story Workspace
 每个 storyId 对应的独立工作空间，是故事状态的**唯一事实来源**。采用 Markdown-first 布局，包含故事元数据、世界设定、主角信息、NPC 角色卡、日志和回合输入输出。
 
+### Story Initialization（故事初始化）
+Issue 7 引入。用户提交自然语言小场景设定，初始化 agent 在 Story Workspace 内生成可玩内容（世界设定、主角、核心 NPC、基础规则、初始状态）并写出开场主角视窗。经 TurnOrchestrator 以 `task="init"` 执行——复用同一把锁、快照与回滚机制，与回合互斥串行。用户明确提供的角色卡/设定是 canon，只能补全不能改写。
+_Avoid_: 手动编辑 workspace、模板表单初始化、把初始化当作普通回合
+
+### Initialized Marker（初始化标记）
+`story.md` frontmatter 中的 `initialized: true`（含 `initializedAt`）。**只由 Web 侧在初始化提交阶段写入**（与开场 history entry 同批提交/回滚），agent 无权写 story.md。API 层据此强制 create → init → turn 状态机：未初始化的故事拒绝回合（story-turn 400），已初始化的故事拒绝重复初始化（initialize 409）。
+_Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状态
+
+### Opening Entry（开场条目）
+初始化成功后追加到 `turns/history.jsonl` 的第一条 History Entry：input 为用户设定，output 为开场主角视窗。刷新页面后开场仍展示；后续回合的 runner 读 history 即获得"玩家已见开场"的上下文。初始化失败时随回滚一起撤销，不会残留。
+
 ### Story Turn（故事回合）
 用户输入主角行动后，系统执行的一次完整处理周期。一个回合从用户输入开始，到返回主角可见输出结束。同一 storyId 的回合串行执行。
 
@@ -58,8 +69,11 @@ Issue 6 引入的首个真实 Agent Runner 实现。通过冷启动 `claude` CLI
 _Avoid_: 永久 agent、产品运行时、会话型 agent
 
 ### Runner 切换（Runner Selection）
-Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `claude`），默认 `fake`。route.ts 模块级单例根据该变量实例化 runner。docker-compose 默认不启用 `claude`，避免无 `ANTHROPIC_API_KEY` 时普通开发跑不起来；启用 `claude` 经 env 覆盖或额外 compose 文件完成。vitest 契约测试始终用 `fake`，不依赖真实 CLI/凭证/网络。
-_Avoid_: 配置文件、运行时热切换、默认强制真实 agent
+Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `claude`），默认 `fake`。Issue 7 起单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用 `claude`，避免无 `ANTHROPIC_API_KEY` 时普通开发跑不起来；启用 `claude` 经 env 覆盖或额外 compose 文件完成。vitest 契约测试始终用 `fake`，不依赖真实 CLI/凭证/网络。
+_Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 route 自建 orchestrator 实例
+
+### Runner Task（runner 任务类型）
+`TurnRequest.task` 字段（Issue 7）：`"turn"`（执行主角一回合，默认）或 `"init"`（初始化 Story Workspace）。Runner 按 task 选择 prompt 与写入范围；TurnOrchestrator 的生命周期编排（锁、快照、磁盘权威、回滚）不随 task 变化，仅在提交阶段对 init 额外写 Initialized Marker。
 
 ## 回合状态相关
 
@@ -100,6 +114,8 @@ _Avoid_: runner 日志、诊断记录
 - 失败并回滚的 **Story Turn** 不保留本回合产生的 **Random Log**；只有成功回合的随机判定成为故事状态的一部分。
 - **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数。两者产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
 - **Runner 切换** 决定 **Turn Orchestrator** 持有哪个 **Agent Runner** 实例，但 **Turn Orchestrator** 的生命周期编排逻辑（锁、快照、磁盘权威、回滚）不随 runner 变化。
+- **Story Initialization** 以 **Runner Task** `init` 经同一 **Turn Orchestrator** 执行；用户设定中的角色卡等明确内容是 canon，agent 只能补全不能改写。
+- 成功的 **Story Initialization** 产生一条 **Opening Entry** 并写入 **Initialized Marker**；两者在同一提交批次内，任一失败则整体回滚。
 - 一个成功提交的 **Story Turn** 产生一条 **History Entry**，追加到 **Turn History**。
 - 失败/回滚的 **Story Turn** 不产生 **History Entry**。
 - **Turn History** 是玩家视角的故事记录，不包含 God State、NPC 私有记忆或内部日志。

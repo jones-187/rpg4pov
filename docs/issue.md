@@ -106,6 +106,11 @@ agent 不自己假装随机
 **Type**: HITL
 **Blocked by**: Issue 4
 **User stories covered**: 技术架构 PRD US 21-27, 29-30, 66-67
+**Status**: 实现完成，待 Docker 环境人工验收
+- ✅ ClaudeCodeRunner 实现：冷启动 `claude -p` 子进程，cwd=workspace，prompt 经 stdin 传递（避免 CLI 3s stdin 等待）
+- ✅ 受控权限：`/app/claude/settings.json` allow/deny（含 roll-choice CLI 包装器）、env 白名单传递、超时 SIGTERM→SIGKILL 渐进 kill
+- ✅ 单元测试（mock spawn）+ 集成测试（fake-claude fixture）全绿
+- ⏭️ 待验收：容器内真实 Claude Code CLI 跑通一个回合（凭证注入 + prompt 稳定性），与 Issue 8 的 HITL 验收合并
 
 **目标行为**：Agent Runtime Adapter 增加 Claude Code CLI Runner。Web 层仍只依赖 Adapter，不直接感知 Claude Code。用户输入后，系统冷启动 Claude Code Runner，让它在当前 storyId 的 Story Workspace 内完成一个回合，并写入固定主角可见输出。
 
@@ -148,6 +153,17 @@ agent 不自己假装随机
 **Type**: AFK
 **Blocked by**: Issue 6
 **User stories covered**: 技术架构 PRD US 50-54
+**Status**: 实现 + 测试完成
+- ✅ 初始化复用 TurnOrchestrator 生命周期（task="init"）：同一把锁/快照/回滚，init 与 turn 互斥串行
+- ✅ `POST /api/stories/{storyId}/initialize`：400 空 setting / 404 不存在 / 409 已初始化或忙 / 500 可重试；成功返回与 story-turn 同形的 `{ playerResponse, turn }`
+- ✅ 开场主角视窗作为第一条 history entry（input=设定，output=开场）；刷新后开场仍在，下一回合 agent 读 history 即知"玩家已见开场"
+- ✅ `story.md` frontmatter `initialized` 标记由 Web 侧在提交阶段写入（与 history append 同批提交/回滚）；agent 无权写 story.md
+- ✅ 初始化 prompt：用户设定为 canon 原文保留、系统只补缺口；小场景规模（3-5 核心 NPC）；禁改 story.md/history.jsonl
+- ✅ story-turn 路由守卫：未初始化故事拒绝回合（400），状态机 create → init → turn 在 API 层强制
+- ✅ 故事页未初始化时显示设定表单（loading/retryInput 模式），成功后切换回合输入
+- ✅ 单元测试全绿：workspace（30）/ claude-prompt（15）/ claude-settings（8）/ fake-agent-runner（8）/ claude-code-runner（含 init prompt 选择）/ turn-orchestrator（23）/ API（40）
+- ✅ 顺手修复 Issue 6.5 遗漏：settings allow 列表补 `Read(./turns/history.jsonl)`（prompt 一直要求读但权限未放行）
+- ⏭️ 待验收：真实 Claude runner 的初始化质量（设定→可玩 workspace）留 Issue 8 HITL 链路验收
 
 **目标行为**：用户输入一个小场景故事设定，初始化 agent 基于该设定生成可玩的 Story Workspace，包括世界设定、主角、核心 NPC、基础规则、初始状态和开场主角视窗。用户提供的明确角色卡内容必须优先保留。
 
