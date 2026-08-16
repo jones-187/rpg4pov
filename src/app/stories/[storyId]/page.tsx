@@ -124,22 +124,25 @@ export default function StoryPage() {
     setError(errorMsg);
   }
 
-  // Issue 7：初始化——提交自然语言设定，开场视窗作为第一条 history entry 返回
-  async function handleInitSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const text = setting.trim();
-    if (!text || loading) return;
+  // 初始化与回合共用一条提交路径：POST → 校验 committed turn → 追加 history。
+  // 差异只有 URL/payload、失败回填的 state 与成功后的额外动作。
+  async function submitTurnLike(
+    url: string,
+    payload: Record<string, string>,
+    refill: (text: string) => void,
+    onSuccess: () => void,
+  ) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/stories/${storyId}/initialize`, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ setting: text }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        applyErrorResponse(res, data, setSetting);
+        applyErrorResponse(res, data, refill);
         return;
       }
       const turn = parseTurnResponse(data);
@@ -147,8 +150,7 @@ export default function StoryPage() {
         throw new Error("响应格式错误：缺少 committed turn");
       }
       setHistory((prev) => [...prev, turn]);
-      setInitialized(true);
-      setSetting("");
+      onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
@@ -156,35 +158,27 @@ export default function StoryPage() {
     }
   }
 
+  // Issue 7：初始化——提交自然语言设定，开场视窗作为第一条 history entry 返回
+  async function handleInitSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const text = setting.trim();
+    if (!text || loading) return;
+    await submitTurnLike(
+      `/api/stories/${storyId}/initialize`,
+      { setting: text },
+      setSetting,
+      () => {
+        setInitialized(true);
+        setSetting("");
+      },
+    );
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/story-turn", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ storyId, input: text }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        // Issue 4：失败响应带 retryInput 时回填输入框
-        applyErrorResponse(res, data, setInput);
-        return;
-      }
-      const turn = parseTurnResponse(data);
-      if (!turn) {
-        throw new Error("响应格式错误：缺少 committed turn");
-      }
-      setHistory((prev) => [...prev, turn]);
-      setInput("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "未知错误");
-    } finally {
-      setLoading(false);
-    }
+    await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""));
   }
 
   if (notFound) {

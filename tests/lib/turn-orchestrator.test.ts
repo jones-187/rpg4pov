@@ -516,4 +516,71 @@ describe("TurnOrchestrator init task (Issue 7)", () => {
       markSpy.mockRestore();
     }
   });
+
+  it("init with placeholder conceptual docs fails validation and rolls back (Seam 8)", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+
+    // runner 只写 output + done，不填概念文档（world/player/rules 仍是占位）
+    class LazyInitRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const turnDir = path.join(req.workspaceDir, "turn");
+        await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n开场。");
+        await fs.writeFile(
+          path.join(turnDir, "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new LazyInitRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, SETTING, { task: "init" });
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("init validation failed");
+
+    // 无 entry、未标记、output 回滚回占位
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).toEqual([]);
+    expect((await getStory(meta.storyId))?.initialized).toBe(false);
+    const output = await fs.readFile(path.join(wsDir, "turn", "output.md"), "utf8");
+    expect(output).toContain("占位");
+  });
+
+  it("init on already-initialized story is rejected under lock without rerunning", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    await orchestrator.executeTurn(meta.storyId, SETTING, { task: "init" });
+    const historyAfterFirst = await readTurnHistory(meta.storyId);
+    expect(historyAfterFirst).toHaveLength(1);
+
+    // 模拟竞态窗口：route 预检查已过，但锁内发现已初始化 → 拒绝，不追加第二条开场
+    const outcome = await orchestrator.executeTurn(meta.storyId, "重复初始化", { task: "init" });
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toBe("story already initialized");
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).toHaveLength(1);
+    expect(history![0].input).toBe(SETTING);
+  });
+
+  it("runner writing done.json but not output.md is caught by placeholder check (审查修复)", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+
+    class DoneOnlyRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        await fs.writeFile(
+          path.join(req.workspaceDir, "turn", "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new DoneOnlyRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "测试");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toBe("output missing or empty");
+  });
 });

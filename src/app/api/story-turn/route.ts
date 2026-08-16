@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   // 守卫在 route 层而非 orchestrator：orchestrator 保持通用 agent 执行机制。
   const story = await getStory(storyId);
   if (!story?.initialized) {
-    return NextResponse.json({ error: "story not initialized" }, { status: 400 });
+    return NextResponse.json({ error: "故事尚未初始化，请先完成初始化" }, { status: 400 });
   }
 
   // Issue 4：串行锁拒绝 → 409（无 retryInput，用户输入还在前端输入框）。

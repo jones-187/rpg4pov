@@ -91,7 +91,7 @@ export class ClaudeCodeRunner implements AgentRunner {
   constructor(opts?: {
     spawnFn?: SpawnFn;
     claudePath?: string;
-    /** 注入自定义模板时单参数函数仍兼容（task 被忽略） */
+    /** 注入模板可只声明 input 参数（TS 少参数函数可赋值）；task 仅默认模板使用 */
     promptTemplate?: (input: string, task: RunnerTask) => string;
   }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;

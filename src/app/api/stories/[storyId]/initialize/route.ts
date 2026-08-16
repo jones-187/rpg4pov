@@ -12,6 +12,8 @@ import { orchestrator } from "@/lib/runner-selection";
  * （{ playerResponse, turn }），前端复用同一渲染路径——开场视窗即第一条 history entry。
  *
  * 状态机：未初始化才可 init；已初始化 → 409；失败可原 storyId 重试（回滚回占位骨架）。
+ * 409 预检查在锁外——并发 initialize 的竞态窗口由 orchestrator 锁内复查兜底
+ * （后到者收到可重试失败，重试时命中这里的 409）。
  * 用户只看固定中文提示，内部 error 分类只进 logs/turn-errors.log。
  */
 export async function POST(
@@ -28,7 +30,7 @@ export async function POST(
   const rawSetting = (body as { setting?: unknown }).setting;
   const setting = typeof rawSetting === "string" ? rawSetting.trim() : "";
   if (!setting) {
-    return NextResponse.json({ error: "setting is required" }, { status: 400 });
+    return NextResponse.json({ error: "设定不能为空" }, { status: 400 });
   }
 
   const story = await getStory(storyId);

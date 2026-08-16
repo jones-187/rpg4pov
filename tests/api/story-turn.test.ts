@@ -156,6 +156,6 @@ describe("POST /api/story-turn (Issue 7: init-before-turn guard)", () => {
     const res = await POST(req({ storyId: meta.storyId, input: "推开木门" }));
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("story not initialized");
+    expect(json.error).toBe("故事尚未初始化，请先完成初始化");
   });
 });

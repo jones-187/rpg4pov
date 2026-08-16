@@ -74,7 +74,7 @@ describe("POST /api/stories/{storyId}/initialize (Issue 7)", () => {
     const res = await POST(req(meta.storyId, { setting: "   " }), ctx(meta.storyId));
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("setting is required");
+    expect(json.error).toBe("设定不能为空");
   });
 
   it("returns 400 when body is not valid JSON", async () => {

@@ -1,10 +1,13 @@
 import type { AgentRunner, RunnerTask, TurnResult } from "./agent-runner";
 import {
+  TURN_OUTPUT_PLACEHOLDER,
   clearTurnDone,
+  getStory,
   markStoryInitialized,
   readTurnDone,
   readTurnOutput,
   resolveWorkspaceDir,
+  validateInitWorkspace,
   writeTurnInput,
 } from "./workspace";
 import { TurnLock, TurnBusyError } from "./turn-lock";
@@ -70,6 +73,16 @@ export class TurnOrchestrator {
     //    注意：锁在 snapshot 之前——并发拒绝不应留下半成品快照。
     const release = this.lock.acquire(storyId);
     try {
+      // 1.5 Issue 7 竞态守卫：锁内复查"已初始化"。
+      //     route 层的 409 预检查在锁外，两个并发 initialize 可能都通过预检查；
+      //     若不在锁内拦下后到者，它会覆盖前者的 workspace 并追加第二条开场 entry。
+      //     此处 plain return（不 failTurn）——尚未发生任何 mutation，无快照可回滚。
+      if (opts?.task === "init") {
+        const story = await getStory(storyId);
+        if (story?.initialized) {
+          return { success: false, playerResponse: null, error: "story already initialized" };
+        }
+      }
       return await this.runWithSnapshot(storyId, playerInput, opts?.task);
     } finally {
       release();
@@ -124,10 +137,21 @@ export class TurnOrchestrator {
       return await this.failTurn(storyId, reason, playerInput, detail);
     }
 
-    // 8. output.md 必须存在且非空
+    // 8. output.md 必须存在且非空。
+    //    精确比对 createStory 的占位原文：runner 只写 done.json 不写 output 时，
+    //    磁盘上残留的是非空占位文件，"非空"检查会误放行（审查修复）。
     const playerResponse = await readTurnOutput(storyId);
-    if (!playerResponse || playerResponse.trim() === "") {
+    if (!playerResponse || playerResponse.trim() === "" || playerResponse === TURN_OUTPUT_PLACEHOLDER) {
       return await this.failTurn(storyId, "output missing or empty", playerInput);
+    }
+
+    // 8.5 Issue 7：初始化提交校验——概念文档必须真的被填充（Seam 8），
+    //     而不是只写了 output/done。失败走 failTurn 回滚到占位骨架。
+    if (task === "init") {
+      const problem = await validateInitWorkspace(storyId);
+      if (problem) {
+        return await this.failTurn(storyId, problem, playerInput);
+      }
     }
 
     // 9. 成功：append history → 删除快照 → 返回 committed entry

@@ -161,7 +161,8 @@ agent 不自己假装随机
 - ✅ 初始化 prompt：用户设定为 canon 原文保留、系统只补缺口；小场景规模（3-5 核心 NPC）；禁改 story.md/history.jsonl
 - ✅ story-turn 路由守卫：未初始化故事拒绝回合（400），状态机 create → init → turn 在 API 层强制
 - ✅ 故事页未初始化时显示设定表单（loading/retryInput 模式），成功后切换回合输入
-- ✅ 单元测试全绿：workspace（30）/ claude-prompt（15）/ claude-settings（8）/ fake-agent-runner（8）/ claude-code-runner（含 init prompt 选择）/ turn-orchestrator（23）/ API（40）
+- ✅ 单元测试全绿（全量 20 文件 213 用例）：workspace（30）/ claude-prompt（15）/ claude-settings（8）/ fake-agent-runner（8）/ turn-orchestrator（26，含 init 校验/竞态守卫）/ API（32）
+- ✅ 代码审查修复：初始化提交校验概念文档真实填充（Seam 8）；锁内复查已初始化关闭并发 initialize 竞态；output.md 占位原文精确比对（runner 只写 done 不写 output 的旧漏洞）；新增用户可见错误信息改固定中文；故事页提交路径去重
 - ✅ 顺手修复 Issue 6.5 遗漏：settings allow 列表补 `Read(./turns/history.jsonl)`（prompt 一直要求读但权限未放行）
 - ⏭️ 待验收：真实 Claude runner 的初始化质量（设定→可玩 workspace）留 Issue 8 HITL 链路验收
 

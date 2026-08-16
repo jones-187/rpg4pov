@@ -73,7 +73,7 @@ Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（
 _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 route 自建 orchestrator 实例
 
 ### Runner Task（runner 任务类型）
-`TurnRequest.task` 字段（Issue 7）：`"turn"`（执行主角一回合，默认）或 `"init"`（初始化 Story Workspace）。Runner 按 task 选择 prompt 与写入范围；TurnOrchestrator 的生命周期编排（锁、快照、磁盘权威、回滚）不随 task 变化，仅在提交阶段对 init 额外写 Initialized Marker。
+`TurnRequest.task` 字段（Issue 7）：`"turn"`（执行主角一回合，默认）或 `"init"`（初始化 Story Workspace）。Runner 按 task 选择 prompt 与写入范围；TurnOrchestrator 的生命周期编排（锁、快照、磁盘权威、回滚）不随 task 变化，init 仅多三处：锁内复查已初始化（并发 initialize 竞态兜底）、提交前校验概念文档真实填充、提交时写 Initialized Marker。
 
 ## 回合状态相关
 
