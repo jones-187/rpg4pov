@@ -44,6 +44,14 @@ describe("claude-prompt", () => {
     expect(prompt).toContain("$&");
     expect(prompt).not.toContain("{PLAYER_INPUT}");
   });
+
+  // --- Issue 9：output.md 首行标题契约（orchestrator 强制校验） ---
+
+  it("turn prompt requires output.md first line to be 「# 主角视窗」", () => {
+    const prompt = buildPrompt("test");
+    expect(prompt).toContain("# 主角视窗");
+    expect(prompt).toContain("第一行");
+  });
 });
 
 describe("claude-prompt: story init (Issue 7)", () => {
@@ -105,5 +113,13 @@ describe("claude-prompt: story init (Issue 7)", () => {
     const prompt = buildInitPrompt("$&");
     expect(prompt).toContain("$&");
     expect(prompt).not.toContain("{PLAYER_INPUT}");
+  });
+
+  // --- Issue 9：output.md 首行标题契约（orchestrator 强制校验） ---
+
+  it("init prompt requires opening output.md first line to be 「# 主角视窗」", () => {
+    const prompt = buildInitPrompt("test");
+    expect(prompt).toContain("# 主角视窗");
+    expect(prompt).toContain("第一行");
   });
 });

@@ -45,11 +45,11 @@ DO NOT:
 
    rollId 用语义化短标识（如 lockpick、perception-check），便于审计。
    工具从 stdout 返回 JSON（RollChoiceResult），你必须服从 selectedId 对应的结果，不能重新选择。
-4. 写 turn/output.md（主角可见输出）
+4. 写 turn/output.md（主角可见输出）：第一行必须是 \`# 主角视窗\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
 5. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
 ## 约束
-- output.md 只写主角视窗：主角能看/听/感知/推理的信息
+- output.md 只写主角视窗：主角能看/听/感知/推理的信息；系统会校验首行标题与格式，不合规的回合会被拒绝回滚
 - 不得泄漏：God State 真相、NPC 私有记忆、内部日志、随机判定日志内容
 - 不得修改 story.md 元数据
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
@@ -90,13 +90,13 @@ DO NOT:
    - player.md：主角角色卡（用户给出的主角内容必须原文保留）+ 初始状态 + 主角已知信息
    - rules.md：基础规则（判定风格、随机权重约定）
    - actors/*.md：3-5 个核心 NPC 角色卡（用户给出的 NPC 内容必须原文保留），各含表面形象与私有记忆/动机
-3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息
+3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息。第一行必须是 \`# 主角视窗\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
 4. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
 ## 约束
 - 用户设定中的明确内容（角色卡、人物关系、世界规则、基调）视为 canon：原文保留，不得改写或删除；只补全用户未定义的部分
 - 用户未定义的部分由你补全，保持小场景规模：1 个主角、3-5 个核心 NPC、有限地点、有限时间跨度
-- output.md 只写主角视窗：开场时主角能看/听/感知的信息
+- output.md 只写主角视窗：开场时主角能看/听/感知的信息；系统会校验首行标题与格式，不合规的初始化会被拒绝回滚
 - 不得泄漏：God State 真相、NPC 私有记忆、内部日志内容
 - 不得修改 story.md、turns/history.jsonl
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
