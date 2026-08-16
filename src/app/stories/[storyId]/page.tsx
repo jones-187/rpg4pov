@@ -20,16 +20,17 @@ interface TurnHistoryEntry {
 
 /**
  * 规范化 output 内容：
- * 如果以 `# 主角视窗` 开头，去掉这一行和紧随其后的空行。
+ * 如果第一个非空行是 `# 主角视窗`，去掉该行及随后的空行。
  * UI 标题已负责展示"主角视窗"，避免重复。
+ * 与校验器 src/lib/turn-output.ts 的"第一个非空行"规则对齐
+ * （客户端组件不能 import turn-output——它会拉入 node:fs）。
  */
 function normalizeOutput(output: string): string {
   const lines = output.split("\n");
-  // 检查第一行是否是 `# 主角视窗`
-  if (lines[0]?.trim() === "# 主角视窗") {
-    // 去掉第一行
-    lines.shift();
-    // 如果下一行是空行，也去掉
+  const headingIdx = lines.findIndex((line) => line.trim() !== "");
+  if (headingIdx !== -1 && lines[headingIdx].trim() === "# 主角视窗") {
+    // 去掉标题行及其前面的空白行；标题后若紧跟空行也去掉
+    lines.splice(0, headingIdx + 1);
     if (lines[0]?.trim() === "") {
       lines.shift();
     }

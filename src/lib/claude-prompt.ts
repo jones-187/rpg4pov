@@ -4,6 +4,8 @@
  * runner 把填充后的完整 prompt 经 stdin 传给 claude -p，不放 argv。
  */
 
+import { TURN_OUTPUT_HEADING } from "./turn-output";
+
 export const STORY_TURN_RUNNER_PROMPT_TEMPLATE = `你是故事模拟引擎的回合执行 agent。当前工作目录是 Story Workspace。
 
 ## 任务
@@ -45,7 +47,7 @@ DO NOT:
 
    rollId 用语义化短标识（如 lockpick、perception-check），便于审计。
    工具从 stdout 返回 JSON（RollChoiceResult），你必须服从 selectedId 对应的结果，不能重新选择。
-4. 写 turn/output.md（主角可见输出）：第一行必须是 \`# 主角视窗\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
+4. 写 turn/output.md（主角可见输出）：第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
 5. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
 ## 约束
@@ -90,7 +92,7 @@ DO NOT:
    - player.md：主角角色卡（用户给出的主角内容必须原文保留）+ 初始状态 + 主角已知信息
    - rules.md：基础规则（判定风格、随机权重约定）
    - actors/*.md：3-5 个核心 NPC 角色卡（用户给出的 NPC 内容必须原文保留），各含表面形象与私有记忆/动机
-3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息。第一行必须是 \`# 主角视窗\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
+3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息。第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
 4. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
 ## 约束

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
+import { TURN_OUTPUT_HEADING } from "./turn-output";
 
 /**
  * Fake Agent Runner — Issue 3 验证用实现。
@@ -28,7 +29,7 @@ export class FakeAgentRunner implements AgentRunner {
     const turnDir = path.join(req.workspaceDir, "turn");
 
     const output = [
-      "# 主角视窗",
+      TURN_OUTPUT_HEADING,
       "",
       "（Fake Agent 固定输出）",
       "",
@@ -88,7 +89,7 @@ export class FakeAgentRunner implements AgentRunner {
     await fs.writeFile(
       path.join(turnDir, "output.md"),
       [
-        "# 主角视窗",
+        TURN_OUTPUT_HEADING,
         "",
         "（Fake Agent 初始化开场）",
         "",
