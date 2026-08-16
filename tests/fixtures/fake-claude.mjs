@@ -101,6 +101,10 @@ async function main() {
       ["# 主角视窗", "", "（fake-claude 初始化开场）", "", "雾从海面漫上来，灯塔的门在你身后关上。", ""].join("\n"),
     );
     await fs.writeFile(
+      path.join(turnDir, "interaction.json"),
+      JSON.stringify({ mode: "continue", suggestions: [] }),
+    );
+    await fs.writeFile(
       path.join(turnDir, "done.json"),
       JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
     );
@@ -119,6 +123,10 @@ async function main() {
   await fs.writeFile(
     path.join(turnDir, "output.md"),
     "# 主角视窗\n\n（fake-claude 输出）\n\n回合执行完成。\n",
+  );
+  await fs.writeFile(
+    path.join(turnDir, "interaction.json"),
+    JSON.stringify({ mode: "continue", suggestions: [] }),
   );
   await fs.writeFile(
     path.join(turnDir, "done.json"),

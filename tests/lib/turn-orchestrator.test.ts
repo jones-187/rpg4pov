@@ -4,7 +4,7 @@ import path from "node:path";
 import { TurnOrchestrator, TurnBusyError } from "@/lib/turn-orchestrator";
 import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
-import { createStory, getStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
+import { createStory, getStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot, resolveWorkspaceDir } from "@/lib/workspace";
 import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
 import { readTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
@@ -733,5 +733,114 @@ describe("TurnOrchestrator output validation (Issue 9)", () => {
     expect(outcome.success).toBe(false);
     expect(outcome.error).toContain("output format invalid");
     expect((await getStory(meta.storyId))?.initialized).toBe(false);
+  });
+});
+
+// --- Issue 10 / 12：Turn Interaction 与隔离扩展 ---
+
+/** 写合法 interaction.json 的 runner */
+class InteractionRunner implements AgentRunner {
+  constructor(private interaction: unknown) {}
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    const turnDir = path.join(req.workspaceDir, "turn");
+    await fs.writeFile(
+      path.join(turnDir, "output.md"),
+      "# 主角视窗\n\n店主放下了手里的杯子。\n",
+    );
+    await fs.writeFile(
+      path.join(turnDir, "interaction.json"),
+      JSON.stringify(this.interaction),
+    );
+    await fs.writeFile(
+      path.join(turnDir, "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    return { success: true };
+  }
+}
+
+/** 把 interaction.json 原文逐字抄进 output 的 runner（Issue 12 外泄场景） */
+class InteractionLeakRunner implements AgentRunner {
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    const turnDir = path.join(req.workspaceDir, "turn");
+    const interaction = JSON.stringify({
+      mode: "decision",
+      suggestions: ["开口", "沉默"],
+    });
+    await fs.writeFile(
+      path.join(turnDir, "output.md"),
+      `# 主角视窗\n\n${interaction}\n`,
+    );
+    await fs.writeFile(path.join(turnDir, "interaction.json"), interaction);
+    await fs.writeFile(
+      path.join(turnDir, "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    return { success: true };
+  }
+}
+
+describe("TurnOrchestrator interaction state (Issue 10)", () => {
+  it("returns sanitized interaction on success", async () => {
+    const story = await createStory();
+    const orch = new TurnOrchestrator(
+      new InteractionRunner({
+        mode: "decision",
+        suggestions: ["开口", "沉默"],
+        hiddenIntent: "internal",
+      }),
+    );
+    const outcome = await orch.executeTurn(story.storyId, "看向店主");
+    expect(outcome.success).toBe(true);
+    expect(outcome.interaction).toEqual({ mode: "decision", suggestions: ["开口", "沉默"] });
+  });
+
+  it("degrades to default interaction when runner writes nothing", async () => {
+    const story = await createStory();
+    const bare = new (class implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const turnDir = path.join(req.workspaceDir, "turn");
+        await fs.writeFile(turnDir + "/output.md", "# 主角视窗\n\n他抬头看你。\n");
+        await fs.writeFile(
+          turnDir + "/done.json",
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    })();
+    const outcome = await new TurnOrchestrator(bare).executeTurn(story.storyId, "x");
+    expect(outcome.success).toBe(true);
+    expect(outcome.interaction).toEqual({ mode: "continue", suggestions: [] });
+  });
+
+  it("continue command writes system directive to input.md and fixed label to history", async () => {
+    const story = await createStory();
+    const orch = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orch.executeTurn(story.storyId, "", {
+      systemCommand: "continue",
+    });
+    expect(outcome.success).toBe(true);
+    expect(outcome.turn?.input).toBe("（继续）");
+    const inputMd = await fs.readFile(
+      path.join(resolveWorkspaceDir(story.storyId), "turn", "input.md"),
+      "utf8",
+    );
+    expect(inputMd).toContain("【系统指令·继续】");
+    const history = await readTurnHistory(story.storyId);
+    expect(history).not.toBeNull();
+    expect(history![history!.length - 1].input).toBe("（继续）");
+  });
+
+  it("interaction.json leak into output fails and rolls back (Issue 12)", async () => {
+    const story = await createStory();
+    const orch = new TurnOrchestrator(new InteractionLeakRunner());
+    const outcome = await orch.executeTurn(story.storyId, "测试");
+    expect(outcome.success).toBe(false);
+    const history = await readTurnHistory(story.storyId);
+    expect(history).toEqual([]);
+    // 回滚后 output 恢复为占位原文（不是 runner 写入的外泄内容）
+    const restored = await readTurnOutput(story.storyId);
+    expect(restored).not.toContain("suggestions");
+    expect(await readTurnDone(story.storyId)).toBe(null);
   });
 });

@@ -3,7 +3,8 @@ import { TURN_OUTPUT_PLACEHOLDER } from "./workspace";
 /**
  * 主角视窗输出校验（Issue 9，arch-prd US 45「basic output validation」/ Decision 34）。
  * 只做"明显不合规"的粗判：缺失/占位、失控超长、缺标题契约、确凿的 JSON 转储、
- * 随机日志行逐字外泄。语义级泄漏审查（可见性/知识违规）是 P1，不在此层。
+ * 随机日志行或 interaction.json 原文逐字外泄（extraLeakFingerprints，Issue 12 扩展）。
+ * 语义级泄漏审查（可见性/知识违规）是 P1，不在此层。
  *
  * 返回问题描述（内部 reason，进 TurnOutcome.error 与错误日志）或 null（通过）。
  */
@@ -20,6 +21,7 @@ export const MAX_TURN_OUTPUT_CHARS = 50_000;
 export function validateTurnOutput(
   content: string | null,
   randomRollLines: string[] = [],
+  extraLeakFingerprints: string[] = [],
 ): string | null {
   // 存在性 + 占位残留（Issue 4 语义，reason 供 orchestrator 测试与日志沿用）
   if (content === null || content.trim() === "" || content === TURN_OUTPUT_PLACEHOLDER) {
@@ -45,12 +47,22 @@ export function validateTurnOutput(
   }
 
   // 随机日志指纹：logs/random-rolls.jsonl 的行被逐字抄进 output（内部日志外泄）
-  const leakedLine = randomRollLines
+  const rollLine = randomRollLines
     .map((line) => line.trim())
     .filter((line) => line !== "")
     .find((line) => content.includes(line));
-  if (leakedLine !== undefined) {
+  if (rollLine !== undefined) {
     return "output format invalid: random log content leaked";
+  }
+
+  // Issue 12 扩展：interaction.json 原文逐字外泄（交互元数据是内部状态）。
+  // 与随机日志分开报因——诊断日志需区分是哪类内部状态泄漏。
+  const interactionLine = extraLeakFingerprints
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .find((line) => content.includes(line));
+  if (interactionLine !== undefined) {
+    return "output format invalid: interaction state leaked";
   }
 
   return null;

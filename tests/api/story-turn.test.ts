@@ -182,3 +182,35 @@ describe("POST /api/story-turn (Issue 9: output isolation)", () => {
     }
   });
 });
+
+// --- Issue 10：continue 命令与交互状态 ---
+
+describe("POST /api/story-turn interaction state (Issue 10)", () => {
+  it("returns interaction in success response", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "看向店主" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.interaction).toEqual({ mode: "continue", suggestions: [] });
+  });
+
+  it("accepts command=continue without input", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, command: "continue" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.turn.input).toBe("（继续）");
+    // turn/input.md 收到系统指令文本，不是空输入
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceRoot(), storyId, "turn", "input.md"),
+      "utf8",
+    );
+    expect(raw).toContain("【系统指令·继续】");
+  });
+
+  it("still 400 when neither input nor continue command", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId }));
+    expect(res.status).toBe(400);
+  });
+});

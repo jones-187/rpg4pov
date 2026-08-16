@@ -2,9 +2,10 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**Issue 7（故事初始化）与 Issue 12 基础（输出格式校验）已实现，本机链路验证完成；待真实 Docker/Claude 环境做 HITL 验收，随后进入叙事能力建设（Issue 8 起）**。
+当前仓库状态：**Issue 7-10、9.5 与 Issue 12 基础+扩展已实现（叙事契约、主角运行时与控制权边界、反馈与长期偏好、Decision Points 与"继续"、交互状态隔离），本机链路验证完成；待真实 Docker/Claude 环境做 HITL 验收（Issue 11）**。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）。
+回合 prompt 已包含 Narrative Turn Contract（有效变化、NPC 意图、视觉小说式表演）、主角运行时控制权边界与心理描写规则、玩家反馈与长期适应（`adjustments.md` / `tendencies.md`）；回合交互状态（连续演出 / 决策点 + 0-4 条建议）经 `turn/interaction.json` 净化后返回，UI 提供"继续"按钮与建议填入。
 已保存并展示玩家可见的回合历史（`turns/history.jsonl`，含 opening 开场条目）。
 
 当前产品路线已明确：不预写固定剧本、章节、角色路线或结局；每个正常回合必须产生玩家可感知的有效变化。系统可以自动演出符合主角人格的低风险心理活动、台词和自然反应，但关键关系方向、重大承诺、信任、原谅和不可逆决定必须交还玩家。
@@ -74,12 +75,15 @@ docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
   rules.md              # 占位
   world.md              # 占位
   player.md             # 占位（主角）
+  adjustments.md        # Confirmed Adjustments 玩家确认修正（Issue 9.5；初始为空）
+  tendencies.md         # Inferred Tendencies 推测倾向（Issue 9.5；初始为空）
   actors/.gitkeep       # 占位（NPC 角色卡目录）
   logs/.gitkeep         # 内部日志目录
   logs/random-rolls.jsonl # 随机判定日志（成功回合追加；不对用户可见）
   logs/turn-errors.log  # 回合失败诊断日志（内部）
-  turn/input.md         # 本回合主角输入
+  turn/input.md         # 本回合主角输入（"继续"系统命令时为系统指令文本）
   turn/output.md        # 本回合固定主角可见输出（Web 唯一返回源）
+  turn/interaction.json # 回合交互状态：continue|decision + 0-4 条建议（Issue 10；Web 只返回净化版本）
   turn/done.json        # 运行成功标记（runner 回合成功后写入；orchestrator 以其磁盘存在性判定成败，回合前清理）
   turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5；含 opening 与 turn 两类条目）
 ```

@@ -68,6 +68,8 @@ export async function createStory(opts?: { title?: string }): Promise<StoryMeta>
   await fs.writeFile(path.join(dir, "rules.md"), RULES_MD);
   await fs.writeFile(path.join(dir, "world.md"), WORLD_MD);
   await fs.writeFile(path.join(dir, "player.md"), PLAYER_MD);
+  await fs.writeFile(path.join(dir, "adjustments.md"), ADJUSTMENTS_MD);
+  await fs.writeFile(path.join(dir, "tendencies.md"), TENDENCIES_MD);
   await fs.writeFile(path.join(dir, "actors", ".gitkeep"), "");
   await fs.writeFile(path.join(dir, "logs", ".gitkeep"), "");
   await fs.writeFile(path.join(dir, "turn", "input.md"), TURN_INPUT_PLACEHOLDER);
@@ -225,6 +227,9 @@ export async function markStoryInitialized(storyId: string): Promise<void> {
 const RULES_MD = `# 规则\n\n（占位：故事运行规则。后续初始化 agent 填充，例如判定风格与随机权重约定。）\n`;
 const WORLD_MD = `# 世界设定\n\n（占位：场景、地点、时间与隐藏事实。后续初始化 agent 填充。）\n`;
 const PLAYER_MD = `# 主角\n\n（占位：主角角色卡与主角已知信息。后续初始化 agent 填充。）\n`;
+/** Issue 9.5：Confirmed Adjustments / Inferred Tendencies 初始为空（无玩家反馈/行为记录）。 */
+const ADJUSTMENTS_MD = `# Confirmed Adjustments（玩家确认修正）\n\n（空：玩家尚未确认任何长期修正。）\n`;
+const TENDENCIES_MD = `# Inferred Tendencies（推测倾向）\n\n（空：尚无带 evidence 与 confidence 的推测记录。）\n`;
 const TURN_INPUT_PLACEHOLDER = `# 本回合输入\n\n（占位：主角本回合输入将写入这里。）\n`;
 /** createStory 写入的 output.md 原文。Orchestrator 用精确比对识别"runner 未写 output"。 */
 export const TURN_OUTPUT_PLACEHOLDER = `# 本回合主角可见输出\n\n（占位：本回合固定主角可见输出。Web 只读取此文件返回用户。）\n`;

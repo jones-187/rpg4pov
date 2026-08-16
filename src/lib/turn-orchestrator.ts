@@ -21,6 +21,12 @@ import {
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
 import { appendTurnHistory, type TurnHistoryEntry } from "./turn-history";
+import {
+  readTurnInteraction,
+  readTurnInteractionRawLine,
+  type TurnInteraction,
+} from "./turn-interaction";
+import { CONTINUE_TURN_INPUT_TEXT, CONTINUE_HISTORY_LABEL } from "./claude-prompt";
 import crypto from "node:crypto";
 
 /** 默认回合超时 300s（Issue 6）。可经 TURN_TIMEOUT_MS 覆盖。 */
@@ -39,6 +45,13 @@ export interface TurnOutcome {
   playerResponse: string | null;
   error?: string;
   turn?: TurnHistoryEntry; // Issue 6.5: 成功时返回 committed entry
+  interaction?: TurnInteraction; // Issue 10: 成功时返回净化后的交互状态
+}
+
+/** executeTurn 选项（Issue 10：systemCommand="continue" 为系统级"继续"控制）。 */
+export interface ExecuteTurnOptions {
+  task?: RunnerTask;
+  systemCommand?: "continue";
 }
 
 /**
@@ -58,7 +71,7 @@ export class TurnOrchestrator {
   async executeTurn(
     storyId: string,
     playerInput: string,
-    opts?: { task?: RunnerTask },
+    opts?: ExecuteTurnOptions,
   ): Promise<TurnOutcome> {
     // 0. 检查 workspace 是否被标记为 unsafe（上回合 rollback 失败残留）
     const unsafe = await readWorkspaceUnsafeMarker(storyId);
@@ -84,7 +97,7 @@ export class TurnOrchestrator {
           return { success: false, playerResponse: null, error: "story already initialized" };
         }
       }
-      return await this.runWithSnapshot(storyId, playerInput, opts?.task);
+      return await this.runWithSnapshot(storyId, playerInput, opts);
     } finally {
       release();
     }
@@ -93,22 +106,29 @@ export class TurnOrchestrator {
   private async runWithSnapshot(
     storyId: string,
     playerInput: string,
-    task?: RunnerTask,
+    opts?: ExecuteTurnOptions,
   ): Promise<TurnOutcome> {
+    const task = opts?.task;
+    // Issue 10：系统级"继续"命令。runner 看到的是系统指令文本（不是主角台词），
+    // 玩家可见历史中记录固定标签（不是主角发言），失败日志仍记原始语义。
+    const runnerInput =
+      opts?.systemCommand === "continue" ? CONTINUE_TURN_INPUT_TEXT : playerInput;
+    const historyInput =
+      opts?.systemCommand === "continue" ? CONTINUE_HISTORY_LABEL : playerInput;
     // 2. 快照（lock 后第一步）——捕获"本回合开始前的完整提交态"（含上回合 done.json）。
     await createSnapshot(storyId);
 
     // 3. clearTurnDone 是本回合第一个 mutation，必须在 snapshot 之后。
     await clearTurnDone(storyId);
 
-    // 4. 写入本次主角输入
-    await writeTurnInput(storyId, playerInput);
+    // 4. 写入本次主角输入（continue 命令时为系统指令文本）
+    await writeTurnInput(storyId, runnerInput);
 
     // 5. 构造回合请求（含超时信号）。task=init 时为初始化任务（Issue 7）。
     const workspaceDir = resolveWorkspaceDir(storyId);
     const timeoutMs = resolveTurnTimeoutMs();
     const signal = AbortSignal.timeout(timeoutMs);
-    const req = { storyId, workspaceDir, playerInput, task, signal };
+    const req = { storyId, workspaceDir, playerInput: runnerInput, task, signal };
     const startedAt = Date.now();
 
     // 6. 调用 runner（捕获异常，统一转失败）
@@ -147,7 +167,11 @@ export class TurnOrchestrator {
       return await this.failTurn(storyId, "output missing or empty", playerInput);
     }
     const rollLines = await readRandomRollLines(storyId);
-    const outputProblem = validateTurnOutput(playerResponse, rollLines);
+    // Issue 12 扩展：interaction.json 原文也是内部状态，逐字外泄同样拦截。
+    const interactionRawLine = await readTurnInteractionRawLine(storyId);
+    const outputProblem = validateTurnOutput(playerResponse, rollLines, [
+      ...(interactionRawLine ? [interactionRawLine] : []),
+    ]);
     if (outputProblem) {
       return await this.failTurn(storyId, outputProblem, playerInput);
     }
@@ -167,7 +191,7 @@ export class TurnOrchestrator {
     const entry: TurnHistoryEntry = {
       turnId,
       at,
-      input: playerInput,
+      input: historyInput,
       output: playerResponse,
     };
 
@@ -197,7 +221,8 @@ export class TurnOrchestrator {
     }
 
     await deleteSnapshot(storyId);
-    return { success: true, playerResponse, turn: entry };
+    // Issue 10：成功时返回净化后的交互状态（Web 唯一交互状态出口）。
+    return { success: true, playerResponse, turn: entry, interaction: await readTurnInteraction(storyId) };
   }
 
   /**

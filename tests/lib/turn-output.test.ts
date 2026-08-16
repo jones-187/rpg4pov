@@ -115,3 +115,20 @@ describe("validateTurnOutput", () => {
     ).toBeNull();
   });
 });
+
+// --- Issue 12 扩展：interaction metadata 外泄指纹 ---
+
+describe("validateTurnOutput extra leak fingerprints (Issue 12)", () => {
+  const heading = "# 主角视窗\n\n";
+  const interactionLine = JSON.stringify({ mode: "decision", suggestions: ["开口"] });
+
+  it("rejects output containing interaction.json raw line verbatim", () => {
+    expect(validateTurnOutput(heading + "她停下了手里的活。\n" + interactionLine, [], [interactionLine])).toContain(
+      "leaked",
+    );
+  });
+
+  it("passes when interaction fingerprint not present", () => {
+    expect(validateTurnOutput(heading + "她抬起头。", [], [interactionLine])).toBeNull();
+  });
+});

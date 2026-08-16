@@ -285,3 +285,18 @@ describe("resolveSnapshotsRoot", () => {
     expect(resolveSnapshotsRoot()).toBe(path.resolve(root, ".snapshots"));
   });
 });
+
+// --- Issue 9.5：Confirmed Adjustments / Inferred Tendencies 初始文件 ---
+
+describe("workspace adjustments/tendencies placeholders (Issue 9.5)", () => {
+  it("createStory creates adjustments.md and tendencies.md", async () => {
+    const meta = await createStory({ title: "反馈测试" });
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const adjustments = await fs.readFile(path.join(dir, "adjustments.md"), "utf8");
+    const tendencies = await fs.readFile(path.join(dir, "tendencies.md"), "utf8");
+    expect(adjustments).toContain("Confirmed Adjustments");
+    expect(adjustments).toContain("（空");
+    expect(tendencies).toContain("Inferred Tendencies");
+    expect(tendencies).toContain("（空");
+  });
+});

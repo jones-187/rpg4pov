@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { GET } from "@/app/api/stories/[storyId]/route";
-import { createStory, markStoryInitialized, resolveWorkspaceRoot } from "@/lib/workspace";
+import { createStory, markStoryInitialized, resolveWorkspaceDir, resolveWorkspaceRoot } from "@/lib/workspace";
 import { appendTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../../helpers/workspace-env";
 
@@ -106,5 +106,41 @@ describe("GET /api/stories/[storyId]", () => {
     expect(raw).not.toContain("GOD-SECRET");
     expect(raw).not.toContain("NPC-MEMORY-SECRET");
     expect(raw).not.toContain("ROLL-SECRET");
+  });
+});
+
+// --- Issue 10：刷新后恢复交互状态 ---
+
+describe("GET /api/stories/{storyId} interaction (Issue 10)", () => {
+  it("returns sanitized interaction state", async () => {
+    const meta = await createStory({ title: "interaction 测试" });
+    await markStoryInitialized(meta.storyId);
+    await fs.writeFile(
+      path.join(resolveWorkspaceDir(meta.storyId), "turn", "interaction.json"),
+      JSON.stringify({
+        mode: "decision",
+        suggestions: ["开口问她", "先不说话"],
+        hiddenIntent: "internal-only",
+      }),
+    );
+    const res = await GET(new Request(`http://localhost/api/stories/${meta.storyId}`), {
+      params: Promise.resolve({ storyId: meta.storyId }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.interaction).toEqual({
+      mode: "decision",
+      suggestions: ["开口问她", "先不说话"],
+    });
+  });
+
+  it("degrades to default when interaction.json missing", async () => {
+    const meta = await createStory({ title: "无交互状态" });
+    const res = await GET(new Request(`http://localhost/api/stories/${meta.storyId}`), {
+      params: Promise.resolve({ storyId: meta.storyId }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.interaction).toEqual({ mode: "continue", suggestions: [] });
   });
 });

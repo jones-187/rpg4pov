@@ -17,7 +17,10 @@ export async function POST(request: Request) {
 
   const rawInput = (body as { input?: unknown }).input;
   const input = typeof rawInput === "string" ? rawInput.trim() : "";
-  if (!input) {
+  // Issue 10：系统级"继续"命令——不需要主角输入
+  const rawCommand = (body as { command?: unknown }).command;
+  const isContinue = rawCommand === "continue";
+  if (!input && !isContinue) {
     return NextResponse.json({ error: "input is required" }, { status: 400 });
   }
 
@@ -36,7 +39,9 @@ export async function POST(request: Request) {
   // 回合失败 → 500 + retryInput（回填输入框供重试）。
   // 用户只看固定中文提示，内部 error 分类只进 logs/turn-errors.log（US 42）。
   try {
-    const outcome = await orchestrator.executeTurn(storyId, input);
+    const outcome = await orchestrator.executeTurn(storyId, input, {
+      systemCommand: isContinue ? "continue" : undefined,
+    });
     if (!outcome.success || !outcome.playerResponse) {
       return NextResponse.json(
         { error: "回合执行失败，请重试", retryInput: input },
@@ -46,6 +51,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       playerResponse: outcome.playerResponse,
       turn: outcome.turn, // Issue 6.5: 返回 committed entry
+      interaction: outcome.interaction, // Issue 10: 净化后的交互状态
     });
   } catch (e) {
     if (e instanceof TurnBusyError) {

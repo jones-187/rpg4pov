@@ -220,7 +220,14 @@ agent 不自己假装随机
 **Type**: HITL
 **Blocked by**: Issue 4, Issue 6, Issue 6.5, Issue 7
 **User stories covered**: 技术架构 PRD US 84-86；产品 PRD US 105, 112-116, 123-124
-**Status**: 规划完成，待实现；本地旧编号 Issue 8 的链路实现状态已迁移至 Issue 11
+**Status**: 实现 + 测试完成（prompt 契约层）
+- ✅ 回合 prompt 新增「回合契约」：写正文前先内部确定有效变化（含非有效变化判据）与相关 NPC 意图，判断过程不进 output.md
+- ✅ Character Intent：NPC 角色卡（actors/*.md）维护 currentEmotion / immediateGoal / hiddenIntent / voice，回合 agent 读取并更新；NPC 主动行动要求与"不能只回答/说明/顺从/等待"约束
+- ✅ Performance：潜台词优先的表现要求与通用 AI 台词/模板动作/无信息量细节禁止清单
+- ✅ 回合结尾可回应状态要求（不停在纯环境描写/模糊感慨）；正式交互结构留 Issue 10（turn/interaction.json）
+- ✅ 初始化 prompt 补 NPC 初始意图块与支撑有效变化的矛盾/秘密/压力源材料
+- ✅ 单元测试：claude-prompt（38 用例，含 Issue 8 契约断言）；tsc 通过
+- ⏭️ 叙事质量的人工判断（有效变化是否可感知、NPC 是否主动）留 Issue 11 HITL
 
 **目标行为**：每个正常 Story Turn 在生成正文前先判断本回合为什么值得发生、结束后什么发生了变化、相关 NPC 正在追求什么，并把结果渲染为第一人称、主角限知、偏 galgame/视觉小说式的玩家可见输出。
 
@@ -352,6 +359,10 @@ Issue 4 提供 workspace 快照、回滚和事务安全边界；Issue 6 提供�
 **Type**: HITL
 **Blocked by**: Issue 7, Issue 8
 **User stories covered**: 技术架构 PRD US 87；产品 PRD US 106-107, 109, 123
+**Status**: 实现 + 测试完成（prompt 契约层）
+- ✅ 回合 prompt 新增「主角运行时」：稳定第一人称声音、具体内心独白要求、模糊中性表达禁止清单
+- ✅ 控制权边界文档化：系统可自动处理 / 不得自行增加两份清单；玩家本回合输入永远覆盖系统自动表现
+- ⏭️ 主角声音稳定性与控制权边界的人工体验留 Issue 11 HITL
 
 **目标行为**：主角拥有稳定、可识别的第一人称叙述声音。系统能自动生成符合主角人格的心理活动、低风险台词和自然反应，同时把重大关系、道德、承诺、原谅、信任和不可逆决定保留给玩家。本 issue 是 Adaptive Authored Protagonist 的运行时切片，Issue 9.5 负责同一能力下的反馈、长期偏好和推测倾向切片。
 
@@ -454,6 +465,12 @@ Issue 7 提供初始 Protagonist Core；Issue 8 让 Story Turn 能读取并使�
 **Type**: HITL
 **Blocked by**: Issue 9
 **User stories covered**: 技术架构 PRD US 88-89；产品 PRD US 108, 110-111
+**Status**: 实现 + 测试完成（状态文件 + prompt 契约层）
+- ✅ createStory 创建 adjustments.md（Confirmed Adjustments）与 tendencies.md（Inferred Tendencies），初始为空
+- ✅ 回合 prompt：本次纠正 vs 长期偏好区分、evidence + confidence 要求、单次行为不得升级、推测不得决定重大立场
+- ✅ 生成优先级文档化：玩家本回合明确输入 → adjustments.md → Protagonist Core → tendencies 高置信 → 低置信 → 系统默认
+- ✅ claude settings 放行 adjustments.md / tendencies.md 读写；初始化 agent 禁改这两个文件
+- ⏭️ 反馈 UI 与真实 runner 下的适应质量留 Issue 11 HITL
 
 **目标行为**：玩家可以纠正主角表现，系统区分本次纠正与长期偏好，根据多次玩家行为逐渐形成 Inferred Tendencies，但不能由单次行为过拟合，也不能偷偷把推测升级为确定人格。本 issue 是 Adaptive Authored Protagonist 的适应切片，与 Issue 9 共同覆盖完整主角模型。
 
@@ -530,6 +547,15 @@ Issue 9 提供主角运行时的稳定行为规则和控制权边界。本 issue
 **Type**: HITL
 **Blocked by**: Issue 8, Issue 9
 **User stories covered**: 技术架构 PRD US 90-91；产品 PRD US 117-122
+**Status**: 实现 + 测试完成
+- ✅ 新增 `src/lib/turn-interaction.ts`：turn/interaction.json 读取与净化（mode ∈ continue|decision、0-4 条建议、长度上限、额外字段一律丢弃）；缺失/坏 JSON/不合法结构降级为默认连续演出态
+- ✅ 回合/初始化 prompt：交互状态判定规则（连续演出 vs 决策点条件）、建议门槛（0-4、同一戏剧问题、不为凑数、禁"继续观察"类选项）、interaction.json 只含 mode/suggestions
+- ✅ Orchestrator：成功返回净化 interaction；"继续"系统命令（systemCommand="continue"）——runner 收到系统指令文本、历史记录固定标签「（继续）」
+- ✅ API：POST /api/story-turn 支持 command=continue（无需 input），成功响应含 interaction；GET /api/stories/{id} 返回 interaction（刷新恢复）
+- ✅ 前端：连续演出阶段显示"继续"按钮；决策点显示建议 chip（点击只填入输入框，不自动提交；自由输入始终保留）
+- ✅ claude settings / fake runner / fake-claude fixture 均覆盖 interaction.json
+- ✅ 单元测试：turn-interaction（15）/ orchestrator（36，含 continue 命令、interaction 净化返回、外泄回滚）/ story-turn API（16）/ [storyId] API（7）/ fake-agent-runner（10）
+- ⏭️ 决策点/建议质量的人工体验留 Issue 11 HITL
 
 **目标行为**：当事件尚未到达真正需要玩家决定的位置时，系统可以连续演出；当关系、风险、承诺、信任、公开信息或不可逆后果需要玩家判断时，系统停在明确可回应的 Decision Point。建议选项只作为决策点辅助，不取代自由输入。
 
@@ -664,13 +690,13 @@ Issue 8 需要先让回合能产生有效变化和可回应状态；Issue 9 至�
 **Type**: HITL
 **Blocked by**: Issue 5, Issue 6.5, Issue 7, Issue 8, Issue 9, Issue 9.5, Issue 10, Issue 12
 **User stories covered**: 技术架构 PRD US 1-7, 50-60, 61-67, 72-91；产品 PRD 中主角视窗、NPC 私有记忆、随机、失败后果、第一人称主角、有效变化、连续演出、决策点和建议门槛相关 MVP 用户故事
-**Status**: 本机可验证部分完成（原旧编号 Issue 8 链路：创建 → 初始化 → 第一个真实回合）；真实环境 HITL 验收待环境（无 Docker/claude CLI/API key）
+**Status**: 本机可验证部分完成（创建 → 初始化 → 回合 → "继续"/决策点建议链路已实现并有测试）；真实环境 HITL 验收待环境（无 Docker/claude CLI/API key）
 - ✅ ClaudeCodeRunner API 全链路测试（tests/api/claude-chain.test.ts）：真实 spawn 路径 + fake-claude fixture 走 initialize → story-turn 完整链路（stdin prompt 注入、Issue 7 init 校验、Issue 12 输出契约、canon 保留、God State 不外泄）；fixture 增加初始化任务分支（按 prompt 写实概念文档、canon 原文进 player.md）
 - ✅ fake runner API 冒烟（dev server，18 项断言）：创建(201) → 未初始化守卫 400 → 初始化 → 409 防重复 → GET 刷新持久化（响应无隐藏事实/NPC 私有记忆字样）→ 第一回合 → history 2 条 → workspace 落盘 canon 保留
 - ✅ 浏览器 UI 冒烟（截图证据 gui-test-screenshots/）：首页创建表单 → 故事页初始化表单（空输入按钮禁用）→ 初始化后开场显示（首行标题契约正常剥离）→ 刷新开场仍在 → 第一回合 loading 态（“处理中…”）→ 两块历史渲染无异常
 - ✅ 全量测试 22 文件 246 用例全绿；tsc 通过
 - ⏭️ 待真实环境验收（HITL，合并 Issue 1/4/6 的 Docker 遗留项）：Docker 构建 + 容器内冒烟、claude CLI 容器内可用性 + 凭证注入、真实 runner 初始化质量（设定 → 可玩 workspace）与故事可玩性主观判断、prompt 稳定性、Issue 12 格式契约在真实输出下的误杀率
-- ⏭️ 未覆盖：Decision Point / 连续演出交互与 UI 属本 issue 新增范围，需在 Issue 9/9.5/10 完成后另行实现与验收
+- ✅ Issue 10 已覆盖：Decision Point / 连续演出交互与 UI（"继续"按钮、建议填入、刷新恢复）已实现，真实 runner 下体验验收并入本 issue HITL
 
 **目标行为**：用户从 Web 页面输入小场景设定，系统创建 storyId，初始化 Story Workspace，然后用户输入主角第一回合行动。真实 CLI agent 读取 workspace、必要时调用随机工具、更新故事文件、写入固定 player response，Web 页面展示第一人称、主角限知、角色驱动的可玩文本；回合结尾要么自然进入连续演出，要么停在明确 Decision Point。
 
@@ -707,7 +733,11 @@ Issue 8 需要先让回合能产生有效变化和可回应状态；Issue 9 至�
 **Type**: AFK
 **Blocked by**: Issue 4, Issue 9, Issue 9.5, Issue 10
 **User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63；产品 PRD 中 God State / NPC Memory / Random Log / NPC hiddenIntent / Inferred Tendencies / interaction metadata 不对用户可见的故事
-**Status**: 基础实现 + 测试完成（对应旧编号 Issue 9 范围）；hiddenIntent / Inferred Tendencies / interaction metadata 的隔离扩展验收待 Issue 9/9.5/10 完成后进行
+**Status**: 基础 + 扩展实现与测试完成
+- ✅ 扩展：validateTurnOutput 支持额外外泄指纹——interaction.json 原文逐字出现在 output.md 时回合失败回滚（orchestrator 测试覆盖）
+- ✅ 交互状态唯一出口是 sanitizeTurnInteraction：额外字段（hiddenIntent / reason 等元数据）一律丢弃，API 测试覆盖
+- ✅ 回合 prompt 隔离清单扩至：NPC hiddenIntent、内部叙事判断、tendencies.md 内容
+- ⏭️ 语义级可见性/知识违规审查仍为 P1（arch-prd），不做
 - ✅ 新增 `src/lib/turn-output.ts`「basic output validation」（US 45 / Decision 34）：存在/占位残留沿用 Issue 4 语义；新增格式粗判——首行必须是 `# 主角视窗` 标题（升格既有事实约定为契约）、长度失控上限（50k 字符）、正文为确凿 JSON 转储、逐字包含 `logs/random-rolls.jsonl` 行（内部日志外泄的确定性判据）
 - ✅ TurnOrchestrator 第 8 步接入校验（turn 与 init 共用），不合规 → failTurn 回滚（连本回合新增 random log 一并撤销）；原因串只进 TurnOutcome.error/错误日志
 - ✅ prompt 契约对齐：turn/init 两个模板写明首行标题要求与"系统会校验、不合规回滚"；与 fake runner 输出、前端 normalizeOutput 一致

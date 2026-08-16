@@ -3,6 +3,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import {
+  sanitizeTurnInteraction,
+  DEFAULT_TURN_INTERACTION,
+  type TurnInteraction,
+} from "@/lib/interaction-schema";
 
 interface StoryMeta {
   storyId: string;
@@ -16,6 +21,11 @@ interface TurnHistoryEntry {
   at: string;
   input: string;
   output: string;
+}
+
+/** 校验响应体/GET 中的 interaction 字段，失败降级为默认连续演出态 */
+function parseInteraction(data: unknown): TurnInteraction {
+  return sanitizeTurnInteraction(data) ?? DEFAULT_TURN_INTERACTION;
 }
 
 /**
@@ -75,7 +85,7 @@ export default function StoryPage() {
   const [notFound, setNotFound] = useState<boolean>(false);
   const [initialized, setInitialized] = useState<boolean>(false);
   const [history, setHistory] = useState<TurnHistoryEntry[]>([]);
-  const [input, setInput] = useState<string>("");
+  const [interaction, setInteraction] = useState<TurnInteraction>(DEFAULT_TURN_INTERACTION);  const [input, setInput] = useState<string>("");
   const [setting, setSetting] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,11 +103,13 @@ export default function StoryPage() {
         const data = (await res.json()) as {
           story: StoryMeta;
           history: TurnHistoryEntry[];
+          interaction?: unknown;
         };
         if (!cancelled) {
           setTitle(data.story.title);
           setInitialized(Boolean(data.story.initialized));
           setHistory(data.history);
+          setInteraction(parseInteraction(data.interaction));
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "未知错误");
@@ -151,6 +163,8 @@ export default function StoryPage() {
         throw new Error("响应格式错误：缺少 committed turn");
       }
       setHistory((prev) => [...prev, turn]);
+      // Issue 10：更新交互状态（缺失/不合法时降级为连续演出态）
+      setInteraction(parseInteraction((data as { interaction?: unknown }).interaction));
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
@@ -180,6 +194,17 @@ export default function StoryPage() {
     const text = input.trim();
     if (!text || loading) return;
     await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""));
+  }
+
+  // Issue 10：系统级"继续"——让人物和事件自然发展，不是主角台词。
+  async function handleContinue() {
+    if (loading) return;
+    await submitTurnLike(
+      "/api/story-turn",
+      { storyId, command: "continue" },
+      () => {},
+      () => setInput(""),
+    );
   }
 
   if (notFound) {
@@ -245,7 +270,21 @@ export default function StoryPage() {
           <button type="submit" disabled={loading || !input.trim()}>
             {loading ? "处理中…" : "发送"}
           </button>
+          {interaction.mode === "continue" && history.length > 0 && (
+            <button type="button" onClick={handleContinue} disabled={loading}>
+              继续
+            </button>
+          )}
         </form>
+      )}
+      {initialized && interaction.mode === "decision" && interaction.suggestions.length > 0 && (
+        <div className="suggestions" aria-label="建议选项">
+          {interaction.suggestions.map((s, i) => (
+            <button key={`${i}-${s}`} type="button" className="suggestion-chip" onClick={() => setInput(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
       )}
       {error && <p className="error">{error}</p>}
     </main>

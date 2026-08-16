@@ -43,6 +43,11 @@ export class FakeAgentRunner implements AgentRunner {
     req.signal.throwIfAborted();
 
     await fs.writeFile(path.join(turnDir, "output.md"), output);
+    // Issue 10：固定交互状态——连续演出阶段、无建议
+    await fs.writeFile(
+      path.join(turnDir, "interaction.json"),
+      JSON.stringify({ mode: "continue", suggestions: [] }),
+    );
     await fs.writeFile(
       path.join(turnDir, "done.json"),
       JSON.stringify({
@@ -96,6 +101,11 @@ export class FakeAgentRunner implements AgentRunner {
         "雨夜的旅店里，壁炉的火光摇曳。你找了个角落的位置坐下，店主从柜台后看了你一眼。",
         "",
       ].join("\n"),
+    );
+    // Issue 10：开场交互状态——连续演出阶段、无建议
+    await fs.writeFile(
+      path.join(turnDir, "interaction.json"),
+      JSON.stringify({ mode: "continue", suggestions: [] }),
     );
     await fs.writeFile(
       path.join(turnDir, "done.json"),

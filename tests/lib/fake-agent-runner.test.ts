@@ -155,3 +155,36 @@ describe("FakeAgentRunner init task (Issue 7)", () => {
     expect(history).toBe("");
   });
 });
+
+// --- Issue 10：固定交互状态 ---
+
+describe("FakeAgentRunner interaction.json (Issue 10)", () => {
+  const makeReq = (storyId: string, playerInput: string) => ({
+    storyId,
+    workspaceDir: resolveWorkspaceDir(storyId),
+    playerInput,
+    signal: AbortSignal.timeout(5000),
+  });
+
+  it("turn writes continue-mode interaction.json", async () => {
+    const story = await createStory();
+    const runner = new FakeAgentRunner();
+    await runner.runTurn(makeReq(story.storyId, "测试回合"));
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(story.storyId), "turn", "interaction.json"),
+      "utf8",
+    );
+    expect(JSON.parse(raw)).toEqual({ mode: "continue", suggestions: [] });
+  });
+
+  it("init writes continue-mode interaction.json", async () => {
+    const story = await createStory();
+    const runner = new FakeAgentRunner();
+    await runner.runTurn({ ...makeReq(story.storyId, "设定"), task: "init" });
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(story.storyId), "turn", "interaction.json"),
+      "utf8",
+    );
+    expect(JSON.parse(raw)).toEqual({ mode: "continue", suggestions: [] });
+  });
+});
