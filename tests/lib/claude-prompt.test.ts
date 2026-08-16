@@ -311,7 +311,7 @@ describe("claude-prompt: emotional continuity reasoning (turn)", () => {
     expect(prompt).toContain("Emotionally Salient Memories");
     expect(prompt).toContain("3 条");
     expect(prompt).toContain("5 条");
-    expect(prompt).toContain("总结压缩");
+    expect(prompt).toContain("数量上限即时维护");
   });
 
   it("keeps ordinary events in history, not actor memory", () => {
@@ -478,5 +478,38 @@ describe("claude-prompt: init materials for Issues 8/9", () => {
   it("init prompt does not touch adjustments/tendencies", () => {
     const prompt = buildInitPrompt("test");
     expect(prompt).toContain("不得修改 story.md、turns/history.jsonl、adjustments.md、tendencies.md");
+  });
+});
+
+// --- Issue 14 验收后修复：记忆保留 / 直球 Agency / 即时上限 ---
+
+describe("claude-prompt: post-acceptance polish (Issue 14)", () => {
+  it("protects definitional memories during compression (no wholesale drop)", () => {
+    const prompt = buildPrompt("test");
+    expect(prompt).toContain("定义性记忆");
+    expect(prompt).toContain("无法解释");
+    expect(prompt).toContain("不得整段丢弃");
+    expect(prompt).toContain("压缩后的语义");
+  });
+
+  it("requires immediate cap maintenance (merge in-turn, no accumulate-then-clean)", () => {
+    const prompt = buildPrompt("test");
+    expect(prompt).toContain("当轮即合并");
+    expect(prompt).toContain("落盘不得超出");
+    expect(prompt).toContain("不得先累积");
+    expect(prompt).toContain("先完成合并/压缩再写入");
+  });
+
+  it("returns major-relationship direct questions to the player (no proxy evasion)", () => {
+    const prompt = buildPrompt("test");
+    expect(prompt).toContain("重大关系直球的交还");
+    expect(prompt).toContain("替主角连答\"不知道\"也是替玩家选择了逃避");
+    expect(prompt).toContain("把实际回答交还玩家");
+  });
+
+  it("direct-question rule does not freeze ordinary dialogue", () => {
+    const prompt = buildPrompt("test");
+    expect(prompt).toContain("只针对重大关系直球");
+    expect(prompt).toContain("自然接话不受影响");
   });
 });

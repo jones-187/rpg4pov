@@ -781,7 +781,7 @@ Issue 9 引入了 Authored Protagonist Runtime 和主角控制权边界；Issue 
 **Type**: AFK
 **Blocked by**: Issue 8（Character Intent 基础）、Issue 9（主角运行时）
 **User stories covered**: 产品 PRD 叙事体验相关用户故事（NPC 有持续情感生命、关系渐进发展、主角有即时情绪但重大结论归玩家）
-**Status**: 实现完成（feat/emotional-continuity 分支）
+**Status**: 实现完成 + 真实模型验收基本通过（2026-08-16，记录见 `docs/acceptance/2026-08-16-issue13-emotional-continuity-acceptance.md`：四故事 69 回合，核心机制确认生效）。验收后的剩余 prompt polish 已随 Issue 14 完成：定义性记忆压缩保护、情感直球 Agency 交还、memory/evidence 即时上限维护。
 
 **问题根因**：Issue 8 的 Character Intent 只给了 NPC"每回合的当前状态"（currentEmotion/immediateGoal/hiddenIntent/voice），没有"历史来源"——情绪每回合重写且无触发源、无关系认知、无私人意义记忆，模型只能从"这回合该吃醋"倒推行为，导致"角色执行剧情"而非"角色从自己是谁推出反应"。同时 Protagonist Agency 只列禁止项，缺少"允许即时情绪"的澄清，主角被写成"愣了一下/没多想"的摄像头。
 
@@ -805,6 +805,35 @@ Issue 9 引入了 Authored Protagonist Runtime 和主角控制权边界；Issue 
 
 1. *重逢吃醋场景*：主角与 NPC A 大学存在未完成暧昧，三年未联系后重逢，A 看到主角帮年轻女同事叫车。期望：信息对 A 造成实际情绪影响、想知道女同事身份、存在明显 restraint、对白绕开真正问题（如"刚才那个女生也是你们组的？"）、行为/注意力/语气轻微变化；不应出现"她是谁/男的女的/你们什么关系"连续审问，不应以"她吃醋了/她发现自己还是喜欢他"代替行为表现，也不应完全无反应。情绪来源应是关系位置（三年未联系、没有资格直接问），而非"竞争女性出现"的模板反应。
 2. *主角不是摄像头场景*：主角与 NPC 长期一起加班、默认一起吃晚饭，某天 NPC 请假。允许写"点外卖习惯性选两份，到付款页才想起来""轻微失落""想发消息又没发"；不得自动写"主角终于意识到自己爱上她"。验证 Protagonist Agency ≠ 禁止即时情感。
+
+------
+
+### 14. Runner History Isolation / Commit Ownership（committed history 提交权隔离）
+
+**Type**: AFK
+**Blocked by**: Issue 12（输出隔离基线）
+**User stories covered**: 产品 PRD 玩家可见历史 / 受信任提交者相关用户故事
+**Status**: 实现完成（fix 分支；来源：Issue 13 真实验收发现的 P1）
+
+**问题根因**：Issue 13 真实验收发现 agent（qwen-fp8）曾在 45 个会话中的 3 次绕过 settings 白名单，用 Bash/python/node 直接写 `turns/history.jsonl`，造成 2 条持久化污染（系统指令原文进入玩家可见 input；伪造 turnId 的重复时间线）。两层失效：① `--permission-mode auto` 会自动放行一切未被 deny 的调用（含任意 Bash）——settings 的 allow 列表在 auto 模式下不是白名单；② prompt 明令禁止修改 history，但模型会违反（"再告诉模型一次"不构成安全边界）。
+
+**核心 invariant**：
+
+```text
+Committed player-visible history is owned exclusively by the orchestrator.
+Agent execution must not mutate committed history.
+```
+
+Agent 可以读取历史、生成候选正文与状态变化，但永远不是玩家可见时间线的 owner。
+
+**实现（双保险）**：
+
+1. **权限收紧（第一层）**：runner 由 `--permission-mode auto` 改为 `default`（经 claude CLI 2.1.140 实证：default 模式下 settings.allow 才是真白名单——未匹配调用一律拒绝，M2；deny 优先于 allow，M3）。settings.json：`turns/**` 的 Write/Edit 双形态（相对 `./` 与容器绝对路径）加入 deny；allow 补绝对路径写入面 `Write(/app/data/workspaces/**)`（真实 agent Write 调用 375/377 为绝对路径，M4+转录统计）。任意 Bash 不再可用，仅保留 `Bash(node /app/cli/roll-choice.js:*)`。
+2. **Orchestrator 守卫（第二层，更重要）**：回合开始（快照后）记录 `turns/history.jsonl` 原文基准；agent 运行结束、orchestrator 正式 append 之前逐字比对（非行数——rewrite/truncate/伪造条目同拦）。不一致即 failTurn → 快照回滚整目录（含 history）→ 正式 turn 不提交。fail closed，不做"修复那一行再继续"。
+
+**验收事故回归测试**：Test A（append 伪造 turn）、Test B（rewrite 已有条目、行数不变）、Test C（伪造 turn-202 重复提交——本轮整体失败、无双提交）、Test D（正常回合恰好 +1 条，守卫不误伤）、truncate 清空拦截、settings 规则断言、runner default 模式断言。
+
+**遗留**：权限实证 M1-M4 已完成；M6（default+绝对路径 allow+turns deny 的四格端到端）因验收期间网关令牌失效未跑完，需随 Docker 真实链路回归复验（HITL）——qwen-fp8 在 default 模式下的回合完成率为观察项，若拒绝导致 done.json 缺失率上升，可独立回退权限层（第二层守卫仍保证 invariant）。
 
 ------
 

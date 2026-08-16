@@ -4,7 +4,7 @@
 
 当前仓库状态：**Issue 7-10、9.5 与 Issue 12 已实现并完成本机验证；真实环境链路验收完成（WSL Docker + NewAPI 网关 + claude CLI 2.1.140：init/turn/continue/决策点建议全链路跑通，输出隔离哨兵检查通过）**。剩余为长线主观体验类验收（叙事质量稳定性）。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
-已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）。
+已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）；committed 玩家历史 exclusively 由 orchestrator 提交——agent 执行期间对 `turns/history.jsonl` 的任何改动都会被逐字比对拦截并整轮回滚，工具权限经 `--permission-mode default` 白名单收紧（Issue 14）。
 回合 prompt 已包含 Narrative Turn Contract（有效变化、NPC 意图、视觉小说式表演）、主角运行时控制权边界与心理描写规则、玩家反馈与长期适应（`adjustments.md` / `tendencies.md`）；回合交互状态（连续演出 / 决策点 + 0-4 条建议）经 `turn/interaction.json` 净化后返回，UI 提供"继续"按钮与建议填入。
 NPC 情感连续性（Issue 13）：核心 NPC 角色卡分层维护 Emotional Core（稳定情感核心）、Relationship State（对主角的方向性关系认知）、Emotionally Salient Memories（event/meaning/impact 私人意义记忆）与增强版 Current Intent（含 emotionalTrigger / emotionalConflict / restraint / behaviorStrategy）；回合生成遵循 Trigger→Meaning→Conflict→Strategy→Performance→Delta 内部推理链，关系状态只在有明确依据时保守更新。主角可拥有即时情绪，但重大心理结论仍由玩家决定。
 已保存并展示玩家可见的回合历史（`turns/history.jsonl`，含 opening 开场条目）。

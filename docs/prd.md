@@ -612,14 +612,15 @@ NPC 的言行应能从"她是谁、她经历过什么、她认为自己和主角
 3. **Emotionally Salient Memory（情感显著记忆）**：每条含 event（发生了什么）、meaning（她如何理解）、impact（为什么重要）。只记录改变关系认知、改变期待、造成明显伤害、建立特殊意义、影响未来选择、形成承诺或私人象征、产生长期误解、形成重要共同经历的事件；普通事件留在 turn history。
 4. **情感推理内部链**：每回合对出场的重要 NPC 内部依次确定 Trigger → Meaning → Emotional Conflict → Strategy → Performance → Delta；推理过程不写入输出、不落盘。
 5. **Relationship Delta 保守原则**：普通聊天不足以改变关系核心；只有明确依据（脆弱时陪伴、失约、发现隐瞒、首次求助、共同历险、真正被理解、关系身份变化、竞争者出现、重要承诺）才产生有意义变化，且记录"发生了什么+她如何理解"，不写"好感提升"式抽象结论。
-6. **增长上限**：recentEvidence ≤3 条、情感显著记忆 ≤5 条，超出时合并或总结压缩最旧的；actor 卡不复制 story history。
+6. **增长上限（即时维护）**：recentEvidence ≤3 条、情感显著记忆 ≤5 条——达到上限时当轮即完成合并/压缩再写入，落盘不得超出，不得先累积等待未来清理；actor 卡不复制 story history。压缩时保护**定义性记忆**：若移除某条记忆会使当前 Relationship State 或 Emotional Core 的来源无法解释（张力起源、unresolvedQuestion 来源、coreFear/vulnerability 触发事件、重要承诺/伤害/身份改变/私人象征起源），保留其压缩后语义，不得整段丢弃。
 7. **潜台词原则**：角色真正想问/想表达的不应总是等于说出口的话；但性格直接或关系安全的角色可以直接表达，不得为潜台词让所有人说谜语。行为首先符合角色。
 8. **情绪行为化**：情绪标签句（"她有些吃醋""心情很复杂"）不得承担核心情感表达；情绪应造成可观察的行为差异。
 9. **初始化防恋爱默认**：不得因故事标签含恋爱/后宫/修罗场就让所有核心 NPC 对主角产生恋爱情感；真正的喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得。
 10. **主角即时情绪**：Player Agency 禁止的是重大心理结论与关系定案，不是禁止主角产生即时情绪。紧张、期待、失落、被触动、在意、轻微嫉妒、想念、舍不得等属于正常即时心理反应，应写入内心独白；迟钝不等于没有情绪，主角不能被写成没有心理反应的摄像头。
 11. **叙事视角一致**：玩家可见叙事默认第一人称、主角限知；用户设定明确指定其他视角时以其为 canon（记录于 Protagonist Core 的 narrativeVoice），初始化与回合契约一致。
-12. **兼容**：旧 actor 卡缺少新结构时合理降级并在后续更新中补建，不报错、不做破坏性 migration。
-13. 明确不做：好感度/情绪数值系统、完整 NPC 关系图（本阶段）、vector DB / embedding memory、Director Agent、多模型情绪裁判、自动恋爱路线规划、强制剧情 Beat。
+12. **重大关系直球的交还**：当 NPC 明确要求主角对重大关系、情感立场或承诺作答时，系统不得替玩家选择接受、拒绝、回避、敷衍或转移等具有关系意义的回应策略（连答"不知道"也是替玩家选择逃避）；应停在需要玩家决策的位置，或只写无方向的瞬时反应，把实际回答交还玩家。仅针对重大关系直球，日常自然接话不受影响。
+13. **兼容**：旧 actor 卡缺少新结构时合理降级并在后续更新中补建，不报错、不做破坏性 migration。
+14. 明确不做：好感度/情绪数值系统、完整 NPC 关系图（本阶段）、vector DB / embedding memory、Director Agent、多模型情绪裁判、自动恋爱路线规划、强制剧情 Beat、为提升 callback 的检索引擎。
 
 ### Performance and Presentation Decisions
 
@@ -664,6 +665,7 @@ NPC 的言行应能从"她是谁、她经历过什么、她认为自己和主角
 5. Initializer 提交 opening entry，TurnOrchestrator 提交 turn entry。
 6. committed history 的写入者应表述为"受信任的系统提交者"，而不是只限 TurnOrchestrator。
 7. Runner / Claude 仍然不得直接修改 committed history。
+8. Agent 不能直接提交玩家可见时间线（Issue 14 invariant）：committed history 的追加权 exclusively 属于受信任的系统提交者；回合执行期间 agent 对该文件的任何改动（append / rewrite / truncate / 伪造条目）都会导致本轮失败并整体回滚，正式 turn 不提交。该保障不依赖 prompt 禁令或工具权限配置单独成立——二者仅为纵深防御层。
 
 ### Group Scene Decisions
 

@@ -178,7 +178,8 @@ _Avoid_: runner 日志、诊断记录
 
 ### Trusted History Committer（受信任历史提交者）
 有权向 committed Story History 追加条目的系统组件。至少包括故事初始化流程（提交 opening entry）和 TurnOrchestrator（提交 turn entry）。Runner / Claude 仍然不得直接修改 committed history。
-_Avoid_: 只允许 TurnOrchestrator 写入、让 Runner 绕过受信任接口直接追加
+_Issue 14 起为强制 invariant_：Agent owns candidate generation; Orchestrator owns committed turn history——回合开始时记录 `turns/history.jsonl` 原文基准，正式 append 前逐字比对（append/rewrite/truncate/伪造条目一律拦截），检出污染即整轮回滚，正式 turn 不提交。权限层同步收紧（`--permission-mode default` 白名单 + `turns/**` 写工具双形态 deny），但不变量不依赖权限层成立。
+_Avoid_: 只允许 TurnOrchestrator 写入、让 Runner 绕过受信任接口直接追加、指望 prompt 禁令构成安全边界、以行数代替逐字比对
 
 ### Turn Interaction（回合交互状态）
 叙事正文之外的交互元数据，属于受控的玩家可见输出。包含当前回合的交互模式（`continue` 或 `decision`），以及 Decision Point 模式下的 0～4 个建议。存储在 `turn/interaction.json`，与 `turn/output.md`（叙事正文）分离，由回合 agent 在写 done 前写入。Web 侧唯一出口是 `sanitizeTurnInteraction`（`src/lib/interaction-schema.ts`，客户端与服务端共用）：mode 非法降级、建议逐条过滤（非字符串/空/超长丢弃）、超 4 条截断、额外字段一律丢弃；文件缺失、JSON 非法或结构不合法整体降级为默认连续演出态（`continue`、无建议）。interaction.json 原文逐字出现在 output.md 中视为内部状态外泄，回合失败回滚。受 snapshot/rollback 覆盖，刷新后经 GET story 恢复。
@@ -220,7 +221,7 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 - 一个成功提交的 **Story Turn** 产生一条 **Turn Entry**，追加到 **Turn History**。
 - 失败/回滚的 **Story Turn** 不产生 **Turn Entry**。
 - **Turn History** 是玩家视角的故事记录，不包含 God State、NPC 私有记忆或内部日志。
-- **Turn History** 由 **Trusted History Committer** 追加；Initializer 提交 opening，TurnOrchestrator 提交 turn。Runner / Claude 不得直接修改。
+- **Turn History** 由 **Trusted History Committer** 追加；Initializer 提交 opening，TurnOrchestrator 提交 turn。Runner 只读不改——Issue 14 起 orchestrator 在每回合正式 append 前逐字校验该文件未被 agent 改动（Agent owns candidate generation; Orchestrator owns committed turn history），违反即整轮回滚。
 - **Claude Code Runner** 读取 **Turn History** 作为玩家已见/已说的上下文，但不得修改或删除 **Turn History**。
 - 一个正常 **Story Turn** 应至少产生一个玩家可感知的 **Meaningful Change**。
 - **Narrative Turn Contract** 约束 **Story Turn** 的叙事逻辑，但不要求拆分新的 Agent Runtime，也不负责 continue/decision 数据结构或交互状态 API。
