@@ -180,3 +180,15 @@ describe("POST /api/stories/{storyId}/initialize (Issue 9: output isolation)", (
     }
   });
 });
+
+// --- Issue 10：初始化响应携带交互状态（开场即决策点时无需刷新） ---
+
+describe("POST /api/stories/{storyId}/initialize interaction (Issue 10)", () => {
+  it("returns interaction in success response", async () => {
+    const meta = await createStory({ title: "开场交互" });
+    const res = await POST(req(meta.storyId, { setting: "雨夜旅店，主角是过路的旅人" }), ctx(meta.storyId));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.interaction).toEqual({ mode: "continue", suggestions: [] });
+  });
+});

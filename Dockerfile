@@ -31,6 +31,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 # 编译 CLI wrapper 到 dist/（含 dist/cli + dist/lib，保证 import 链完整）
 RUN pnpm build:cli
+# 从编译产物导出受控 settings.json（单一来源 src/lib/claude-settings.ts，避免与 Dockerfile 内联副本漂移）
+RUN node -e "process.stdout.write(require('./dist/lib/claude-settings.js').CLAUDE_SETTINGS_JSON + '\n')" > /app/claude-settings.json
 
 # ---- runner ----
 FROM node:20-alpine AS runner
@@ -62,40 +64,8 @@ RUN addgroup --system --gid 1001 nodejs \
  && chown -R nextjs:nodejs /app/data /app/claude /home/nextjs/.claude
 
 # 写受控 settings.json 到 /app/claude/settings.json（不放 workspace，运行时只读）
-# 内容来自 src/lib/claude-settings.ts 的 CLAUDE_SETTINGS_JSON，此处内联（构建时写死）
-COPY --chown=nextjs:nodejs <<'SETTINGS' /app/claude/settings.json
-{
-  "env": {
-    "USE_BUILTIN_RIPGREP": "0"
-  },
-  "permissions": {
-    "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Read(./secrets/**)",
-      "Write(./.env)",
-      "Write(./.env.*)",
-      "Write(./secrets/**)"
-    ],
-    "allow": [
-      "Read(./story.md)",
-      "Read(./world.md)",
-      "Read(./player.md)",
-      "Read(./rules.md)",
-      "Read(./turn/input.md)",
-      "Read(./actors/**)",
-      "Read(./logs/**)",
-      "Write(./turn/output.md)",
-      "Write(./turn/done.json)",
-      "Write(./world.md)",
-      "Write(./player.md)",
-      "Write(./actors/**)",
-      "Write(./logs/**)",
-      "Bash(node /app/cli/roll-choice.js:*)"
-    ]
-  }
-}
-SETTINGS
+# 内容在 builder 阶段从 dist/lib/claude-settings.js 导出——与 src/lib/claude-settings.ts 单一来源
+COPY --from=builder --chown=nextjs:nodejs /app/claude-settings.json /app/claude/settings.json
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

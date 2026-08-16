@@ -52,6 +52,7 @@ export async function POST(
     return NextResponse.json({
       playerResponse: outcome.playerResponse,
       turn: outcome.turn,
+      interaction: outcome.interaction, // Issue 10：开场即停在决策点时无需刷新即可显示建议
     });
   } catch (e) {
     if (e instanceof TurnBusyError) {

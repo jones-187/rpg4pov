@@ -17,9 +17,10 @@ export async function POST(request: Request) {
 
   const rawInput = (body as { input?: unknown }).input;
   const input = typeof rawInput === "string" ? rawInput.trim() : "";
-  // Issue 10：系统级"继续"命令——不需要主角输入
+  // Issue 10：系统级"继续"命令——不需要主角输入。
+  // 若同时提供了 input，则按普通回合处理（不静默丢弃玩家输入）。
   const rawCommand = (body as { command?: unknown }).command;
-  const isContinue = rawCommand === "continue";
+  const isContinue = rawCommand === "continue" && !input;
   if (!input && !isContinue) {
     return NextResponse.json({ error: "input is required" }, { status: 400 });
   }

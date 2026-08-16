@@ -85,7 +85,8 @@ export default function StoryPage() {
   const [notFound, setNotFound] = useState<boolean>(false);
   const [initialized, setInitialized] = useState<boolean>(false);
   const [history, setHistory] = useState<TurnHistoryEntry[]>([]);
-  const [interaction, setInteraction] = useState<TurnInteraction>(DEFAULT_TURN_INTERACTION);  const [input, setInput] = useState<string>("");
+  const [interaction, setInteraction] = useState<TurnInteraction>(DEFAULT_TURN_INTERACTION);
+  const [input, setInput] = useState<string>("");
   const [setting, setSetting] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);

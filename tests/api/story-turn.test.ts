@@ -214,3 +214,15 @@ describe("POST /api/story-turn interaction state (Issue 10)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("POST /api/story-turn command+input precedence (Issue 10)", () => {
+  it("treats request as a normal turn when both input and command=continue are provided", async () => {
+    const storyId = await freshStory();
+    const res = await POST(req({ storyId, input: "开口问店主今晚有没有空房", command: "continue" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // 玩家输入不因 command 字段被静默丢弃
+    expect(json.turn.input).toBe("开口问店主今晚有没有空房");
+    expect(json.playerResponse).toContain("开口问店主今晚有没有空房");
+  });
+});

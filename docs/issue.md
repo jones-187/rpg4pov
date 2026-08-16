@@ -551,7 +551,8 @@ Issue 9 提供主角运行时的稳定行为规则和控制权边界。本 issue
 - ✅ 新增 `src/lib/turn-interaction.ts`：turn/interaction.json 读取与净化（mode ∈ continue|decision、0-4 条建议、长度上限、额外字段一律丢弃）；缺失/坏 JSON/不合法结构降级为默认连续演出态
 - ✅ 回合/初始化 prompt：交互状态判定规则（连续演出 vs 决策点条件）、建议门槛（0-4、同一戏剧问题、不为凑数、禁"继续观察"类选项）、interaction.json 只含 mode/suggestions
 - ✅ Orchestrator：成功返回净化 interaction；"继续"系统命令（systemCommand="continue"）——runner 收到系统指令文本、历史记录固定标签「（继续）」
-- ✅ API：POST /api/story-turn 支持 command=continue（无需 input），成功响应含 interaction；GET /api/stories/{id} 返回 interaction（刷新恢复）
+- ✅ API：POST /api/story-turn 支持 command=continue（无需 input；同时提供 input 时按普通回合处理），成功响应含 interaction；POST initialize 成功响应同样含 interaction（开场即决策点时无需刷新）；GET /api/stories/{id} 返回 interaction（刷新恢复）
+- ✅ 复审修复：Dockerfile 内联 settings.json 副本改为构建时从 dist/lib/claude-settings.js 导出（单一来源，否则容器内 agent 无 adjustments/tendencies/interaction 写权限）
 - ✅ 前端：连续演出阶段显示"继续"按钮；决策点显示建议 chip（点击只填入输入框，不自动提交；自由输入始终保留）
 - ✅ claude settings / fake runner / fake-claude fixture 均覆盖 interaction.json
 - ✅ 单元测试：turn-interaction（15）/ orchestrator（36，含 continue 命令、interaction 净化返回、外泄回滚）/ story-turn API（16）/ [storyId] API（7）/ fake-agent-runner（10）
