@@ -1,7 +1,7 @@
 /**
- * 首版 agent prompt（Issue 6）。
- * 放代码常量便于版本管理与 runner 引用；后续可迁移到 prompts/story-turn-runner.md。
- * runner 把填充后的完整 prompt 经临时文件传给 claude -p，不放 argv。
+ * Agent prompt 模板（Issue 6 回合执行 + Issue 7 初始化）。
+ * 放代码常量便于版本管理与 runner 引用；后续可迁移到 prompts/*.md。
+ * runner 把填充后的完整 prompt 经 stdin 传给 claude -p，不放 argv。
  */
 
 export const STORY_TURN_RUNNER_PROMPT_TEMPLATE = `你是故事模拟引擎的回合执行 agent。当前工作目录是 Story Workspace。
@@ -58,4 +58,50 @@ DO NOT:
 
 export function buildPrompt(playerInput: string): string {
   return STORY_TURN_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => playerInput);
+}
+
+/**
+ * 初始化 agent prompt（Issue 7）。
+ * 与回合 prompt 同构：任务 → history 只读说明 → 设定输入 → 工作流程 → 约束。
+ * 用户提供的明确内容（角色卡、世界设定）是 canon，只能补全不能改写（arch-prd US 53 / Decision 54）。
+ */
+export const STORY_INIT_RUNNER_PROMPT_TEMPLATE = `你是故事模拟引擎的初始化 agent。当前工作目录是 Story Workspace。
+
+## 任务
+根据用户设定初始化 Story Workspace，生成可玩的小场景故事，并写出开场主角视窗。这不是执行回合——故事将从零开始。
+
+## Player-visible Turn History (READ-ONLY)
+
+The file \`turns/history.jsonl\` contains the committed history of what the player has seen and said.
+For a new story it is empty. This is the player's perspective — use it to understand context, but DO NOT modify this file.
+
+DO NOT:
+- Modify turns/history.jsonl
+- Delete turns/history.jsonl
+- Write any turn records — the system appends history after you succeed
+
+## 用户设定（canon，优先级最高）
+{PLAYER_INPUT}
+
+## 工作流程
+1. 读取现有占位文件了解结构：story.md, world.md, player.md, rules.md
+2. 生成初始化内容：
+   - world.md：小场景世界设定——地点（有限几个）、时间、氛围、隐藏事实（God State，主角未知）
+   - player.md：主角角色卡（用户给出的主角内容必须原文保留）+ 初始状态 + 主角已知信息
+   - rules.md：基础规则（判定风格、随机权重约定）
+   - actors/*.md：3-5 个核心 NPC 角色卡（用户给出的 NPC 内容必须原文保留），各含表面形象与私有记忆/动机
+3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息
+4. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
+
+## 约束
+- 用户设定中的明确内容（角色卡、人物关系、世界规则、基调）视为 canon：原文保留，不得改写或删除；只补全用户未定义的部分
+- 用户未定义的部分由你补全，保持小场景规模：1 个主角、3-5 个核心 NPC、有限地点、有限时间跨度
+- output.md 只写主角视窗：开场时主角能看/听/感知的信息
+- 不得泄漏：God State 真相、NPC 私有记忆、内部日志内容
+- 不得修改 story.md、turns/history.jsonl
+- 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
+- 仅可写 world.md、player.md、rules.md、actors/**、turn/output.md、turn/done.json，不得创建其他文件`;
+
+export function buildInitPrompt(setting: string): string {
+  return STORY_INIT_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => setting);
 }

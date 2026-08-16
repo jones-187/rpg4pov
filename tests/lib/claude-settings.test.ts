@@ -35,6 +35,18 @@ describe("claude-settings", () => {
     expect(allow).toContain("Read(./turn/input.md)");
   });
 
+  it("settings allow init agent 可写 rules.md（Issue 7）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    expect(parsed.permissions.allow).toContain("Write(./rules.md)");
+  });
+
+  it("settings allow 读取回合历史（Issue 6.5/7：runner prompt 要求读 turns/history.jsonl）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    expect(parsed.permissions.allow).toContain("Read(./turns/history.jsonl)");
+    // 历史只读：Write 规则不得放行 turns/**
+    expect((parsed.permissions.allow as string[]).some((r) => r.startsWith("Write(./turns"))).toBe(false);
+  });
+
   it("settings 不含 dangerously skip permissions 或 bypassPermissions", () => {
     expect(CLAUDE_SETTINGS_JSON.toLowerCase()).not.toContain("dangerously");
     expect(CLAUDE_SETTINGS_JSON.toLowerCase()).not.toContain("bypasspermissions");
