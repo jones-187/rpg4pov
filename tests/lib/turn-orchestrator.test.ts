@@ -434,7 +434,7 @@ describe("TurnOrchestrator", () => {
       async runTurn(req: TurnRequest): Promise<TurnResult> {
         seen.push(req.task);
         const turnDir = path.join(req.workspaceDir, "turn");
-        await fs.writeFile(path.join(turnDir, "output.md"), "开场");
+        await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n开场");
         await fs.writeFile(
           path.join(turnDir, "done.json"),
           JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
@@ -582,5 +582,156 @@ describe("TurnOrchestrator init task (Issue 7)", () => {
     const outcome = await orchestrator.executeTurn(meta.storyId, "测试");
     expect(outcome.success).toBe(false);
     expect(outcome.error).toBe("output missing or empty");
+  });
+});
+
+// --- Issue 9：主角视窗输出校验（格式明显不合规 → 失败并回滚） ---
+
+/** 写合规 output（首行标题）+ done.json 的基线 runner，content 可注入 */
+class CompliantOutputRunner implements AgentRunner {
+  constructor(private readonly body: string) {}
+  async runTurn(req: TurnRequest): Promise<TurnResult> {
+    const turnDir = path.join(req.workspaceDir, "turn");
+    await fs.writeFile(turnDir + path.sep + "output.md", `# 主角视窗\n\n${this.body}`);
+    await fs.writeFile(
+      path.join(turnDir, "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    return { success: true };
+  }
+}
+
+describe("TurnOrchestrator output validation (Issue 9)", () => {
+  it("output without 主角视窗 heading fails and rolls back", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+    const wsDir = path.join(root, meta.storyId);
+
+    class NoHeadingRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const turnDir = path.join(req.workspaceDir, "turn");
+        await fs.writeFile(path.join(turnDir, "output.md"), "夜色深沉，没有标题。");
+        await fs.writeFile(
+          path.join(turnDir, "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new NoHeadingRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("output format invalid");
+
+    // 回滚：output.md 恢复占位，无 history entry
+    const output = await fs.readFile(path.join(wsDir, "turn", "output.md"), "utf8");
+    expect(output).toContain("占位");
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).toEqual([]);
+  });
+
+  it("output that dumps JSON as narrative fails", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+
+    const orchestrator = new TurnOrchestrator(
+      new CompliantOutputRunner('{"result":"ok","stdout":"..."}'),
+    );
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("JSON");
+  });
+
+  it("runaway oversized output fails", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+
+    const { MAX_TURN_OUTPUT_CHARS } = await import("@/lib/turn-output");
+    const orchestrator = new TurnOrchestrator(
+      new CompliantOutputRunner("雨".repeat(MAX_TURN_OUTPUT_CHARS)),
+    );
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("exceeds");
+  });
+
+  it("output containing a random-rolls.jsonl line verbatim fails (内部日志外泄)", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+    const rollLine = JSON.stringify({
+      at: "2026-08-16T00:00:00.000Z",
+      storyId: meta.storyId,
+      rollId: "perception-check",
+      type: "roll-choice",
+      candidates: [{ id: "success", weight: 1 }],
+      selectedId: "success",
+      randomSource: "crypto",
+      sample: 0.5,
+    });
+    // runner 在回合内调用随机工具（快照后写入），并把结果行逐字抄进 output
+    class RollingLeakRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        await fs.writeFile(
+          path.join(req.workspaceDir, "logs", "random-rolls.jsonl"),
+          rollLine + "\n",
+        );
+        const turnDir = path.join(req.workspaceDir, "turn");
+        await fs.writeFile(turnDir + path.sep + "output.md", `# 主角视窗\n\n${rollLine}\n\n你环顾四周。`);
+        await fs.writeFile(
+          path.join(turnDir, "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new RollingLeakRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("random log");
+    // 回滚连本回合的 random log 一并撤销（快照在 roll 写入之前）
+    await expect(
+      fs.access(path.join(root, meta.storyId, "logs", "random-rolls.jsonl")),
+    ).rejects.toThrow();
+  });
+
+  it("random rolls present but not copied into output → turn succeeds (无 false positive)", async () => {
+    const meta = await createStory();
+    await (await import("@/lib/workspace")).markStoryInitialized(meta.storyId);
+    const rollLine = JSON.stringify({ rollId: "luck", selectedId: "fail", sample: 0.9 });
+    await fs.writeFile(path.join(root, meta.storyId, "logs", "random-rolls.jsonl"), rollLine + "\n");
+
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(true);
+    expect(outcome.playerResponse).not.toContain("luck");
+  });
+
+  it("init task opening output is subject to the same heading contract", async () => {
+    const meta = await createStory();
+
+    class NoHeadingInitRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        const dir = req.workspaceDir;
+        // 概念文档填实（绕过 init 校验），但 output 无标题 → 应被格式校验拦下
+        await fs.writeFile(path.join(dir, "world.md"), "# 世界\n\n真实设定内容。");
+        await fs.writeFile(path.join(dir, "player.md"), "# 主角\n\n真实主角卡。");
+        await fs.writeFile(path.join(dir, "rules.md"), "# 规则\n\n真实规则。");
+        await fs.writeFile(path.join(dir, "actors", "npc.md"), "# NPC\n\n真实 NPC。");
+        await fs.writeFile(path.join(dir, "turn", "output.md"), "开场：雨夜旅店。");
+        await fs.writeFile(
+          path.join(dir, "turn", "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+
+    const orchestrator = new TurnOrchestrator(new NoHeadingInitRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "设定", { task: "init" });
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("output format invalid");
+    expect((await getStory(meta.storyId))?.initialized).toBe(false);
   });
 });

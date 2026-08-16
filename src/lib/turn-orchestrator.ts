@@ -1,15 +1,16 @@
 import type { AgentRunner, RunnerTask, TurnResult } from "./agent-runner";
 import {
-  TURN_OUTPUT_PLACEHOLDER,
   clearTurnDone,
   getStory,
   markStoryInitialized,
+  readRandomRollLines,
   readTurnDone,
   readTurnOutput,
   resolveWorkspaceDir,
   validateInitWorkspace,
   writeTurnInput,
 } from "./workspace";
+import { validateTurnOutput } from "./turn-output";
 import { TurnLock, TurnBusyError } from "./turn-lock";
 import {
   createSnapshot,
@@ -137,12 +138,18 @@ export class TurnOrchestrator {
       return await this.failTurn(storyId, reason, playerInput, detail);
     }
 
-    // 8. output.md 必须存在且非空。
-    //    精确比对 createStory 的占位原文：runner 只写 done.json 不写 output 时，
-    //    磁盘上残留的是非空占位文件，"非空"检查会误放行（审查修复）。
+    // 8. output.md 校验。Web 返回给用户的内容只来自这个文件（US 38/45），
+    //    所以"明显不合规"在此拦截并回滚：存在/占位残留（Issue 4，含 runner
+    //    只写 done 不写 output 的情形）+ 格式粗判（Issue 9：首行标题契约、
+    //    失控超长、JSON 转储、随机日志行逐字外泄）。turn 与 init 共用。
     const playerResponse = await readTurnOutput(storyId);
-    if (!playerResponse || playerResponse.trim() === "" || playerResponse === TURN_OUTPUT_PLACEHOLDER) {
+    if (playerResponse === null) {
       return await this.failTurn(storyId, "output missing or empty", playerInput);
+    }
+    const rollLines = await readRandomRollLines(storyId);
+    const outputProblem = validateTurnOutput(playerResponse, rollLines);
+    if (outputProblem) {
+      return await this.failTurn(storyId, outputProblem, playerInput);
     }
 
     // 8.5 Issue 7：初始化提交校验——概念文档必须真的被填充（Seam 8），
