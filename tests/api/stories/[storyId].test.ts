@@ -1,7 +1,9 @@
 // tests/api/stories/[storyId].test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { GET } from "@/app/api/stories/[storyId]/route";
-import { createStory, markStoryInitialized } from "@/lib/workspace";
+import { createStory, markStoryInitialized, resolveWorkspaceRoot } from "@/lib/workspace";
 import { appendTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../../helpers/workspace-env";
 
@@ -73,5 +75,36 @@ describe("GET /api/stories/[storyId]", () => {
       { params: Promise.resolve({ storyId: "00000000-0000-4000-8000-000000000000" }) },
     );
     expect(res.status).toBe(404);
+  });
+
+  // --- Issue 9：GET 只返回 meta + history，隐藏文件内容不外泄 ---
+
+  it("does not return world/actors/logs content (God State / NPC memory / random log)", async () => {
+    const meta = await createStory({ title: "隔离测试" });
+    const wsDir = path.join(resolveWorkspaceRoot(), meta.storyId);
+    // 在隐藏文件中放入哨兵内容
+    await fs.writeFile(path.join(wsDir, "world.md"), "# 世界\n\nGOD-SECRET-隐藏事实：幕后黑手是店主。");
+    await fs.writeFile(path.join(wsDir, "actors", "npc.md"), "# NPC\n\nNPC-MEMORY-SECRET：她认得凶手的脸。");
+    await fs.writeFile(
+      path.join(wsDir, "logs", "random-rolls.jsonl"),
+      JSON.stringify({ rollId: "ROLL-SECRET-luck", selectedId: "fail" }) + "\n",
+    );
+    await appendTurnHistory(meta.storyId, {
+      turnId: "turn-1",
+      at: "2026-08-16T00:00:00.000Z",
+      input: "环顾四周",
+      output: "# 主角视窗\n\n你环顾四周，一切安静。",
+    });
+
+    const res = await GET(makeRequest(meta.storyId), {
+      params: Promise.resolve({ storyId: meta.storyId }),
+    });
+    expect(res.status).toBe(200);
+    const raw = JSON.stringify(await res.json());
+    // 玩家可见内容在，隐藏内容不在
+    expect(raw).toContain("你环顾四周，一切安静。");
+    expect(raw).not.toContain("GOD-SECRET");
+    expect(raw).not.toContain("NPC-MEMORY-SECRET");
+    expect(raw).not.toContain("ROLL-SECRET");
   });
 });

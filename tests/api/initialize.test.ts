@@ -9,6 +9,7 @@ import {
   createStory,
   getStory,
   markStoryInitialized,
+  readTurnOutput,
   resolveWorkspaceRoot,
 } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
@@ -140,5 +141,42 @@ describe("POST /api/stories/{storyId}/initialize (Issue 7)", () => {
     const retry = await POST(req(meta.storyId, { setting: SETTING }), ctx(meta.storyId));
     expect(retry.status).toBe(200);
     expect((await getStory(meta.storyId))?.initialized).toBe(true);
+  });
+});
+
+describe("POST /api/stories/{storyId}/initialize (Issue 9: output isolation)", () => {
+  it("playerResponse comes only from output.md — God State / NPC private memory never leak", async () => {
+    const meta = await createStory({ title: "隔离测试" });
+    const res = await POST(req(meta.storyId, { setting: SETTING }), ctx(meta.storyId));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    // Web 唯一来源锁定
+    expect(json.playerResponse).toBe(await readTurnOutput(meta.storyId));
+
+    // fake init runner 写入 world.md 的隐藏事实与 actors 的 NPC 私有记忆不出现在响应
+    expect(json.playerResponse).not.toContain("走私团伙");
+    expect(json.playerResponse).not.toContain("私有记忆");
+    expect(json.playerResponse).not.toContain("斗篷人");
+  });
+
+  it("500 failure response carries fixed message only — internal error details never leak", async () => {
+    const meta = await createStory();
+    const spy = vi.spyOn(orchestrator, "executeTurn").mockResolvedValue({
+      success: false,
+      playerResponse: null,
+      error: "INTERNAL-SECRET-REASON claude exit code 1",
+    });
+    try {
+      const res = await POST(req(meta.storyId, { setting: SETTING }), ctx(meta.storyId));
+      expect(res.status).toBe(500);
+      const raw = JSON.stringify(await res.json());
+      expect(raw).not.toContain("INTERNAL-SECRET-REASON");
+      expect(raw).not.toContain("claude");
+      expect(raw).toContain("初始化失败，请重试");
+      expect(raw).toContain(SETTING); // retryInput 回填
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

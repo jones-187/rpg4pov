@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { POST } from "@/app/api/story-turn/route";
@@ -157,5 +157,28 @@ describe("POST /api/story-turn (Issue 7: init-before-turn guard)", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("故事尚未初始化，请先完成初始化");
+  });
+});
+
+describe("POST /api/story-turn (Issue 9: output isolation)", () => {
+  it("500 failure response carries fixed message only — internal error/stdout never leak", async () => {
+    const storyId = await freshStory();
+    const { orchestrator } = await import("@/lib/runner-selection");
+    const spy = vi.spyOn(orchestrator, "executeTurn").mockResolvedValue({
+      success: false,
+      playerResponse: null,
+      error: "INTERNAL-SECRET-REASON claude exit code 1",
+    });
+    try {
+      const res = await POST(req({ storyId, input: "试探" }));
+      expect(res.status).toBe(500);
+      const raw = JSON.stringify(await res.json());
+      expect(raw).not.toContain("INTERNAL-SECRET-REASON");
+      expect(raw).not.toContain("claude");
+      expect(raw).toContain("回合执行失败，请重试");
+      expect(raw).toContain("试探"); // retryInput 回填
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
