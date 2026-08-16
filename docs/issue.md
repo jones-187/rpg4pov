@@ -1,5 +1,7 @@
 下面是基于“产品 PRD + 技术架构 PRD”的 **第一版垂直切分草案**。我按“每个 issue 做完都能 demo / 验证一个端到端行为”来切，没有按模块横切。
 
+说明：产品 PRD 中的 Player Knowledge Log、输入拆分（行动意图/主角台词/推理假设）、NPC 私有记忆与关系记录等 P0 模拟机制，MVP 阶段由 Runner 在 Story Workspace 内隐式承担，不单独切 issue；待最小真实可玩链路（Issue 11）验证后再决定是否显式化。
+
 ## 拟拆分 Issues
 
 ### 1. 启动 Docker 化极简 Web 故事壳
@@ -750,7 +752,7 @@ Issue 9      ← Adaptive Authored Protagonist Runtime（MVP 必需）
 Issue 9.5    ← Adaptive Protagonist Feedback & Adaptation（MVP 必需，完整 AAP 验收的一部分）
 Issue 10
 Issue 12     ← 依赖 Issue 9/9.5/10
-Issue 11     ← 依赖 7/8/9/9.5/10/12
+Issue 11     ← 依赖 5/6.5/7/8/9/9.5/10/12（与条目头部 Blocked by 一致；5、6.5 经 7 传递）
 ```
 
 ## 依赖关系简图
@@ -780,7 +782,7 @@ Issue 11     ← 依赖 7/8/9/9.5/10/12
    ↓
 12. 输出隔离强化（≥ Issue 9/9.5/10）
                      ↓
-                  11. 最小真实可玩链路（≥ 7/8/9/9.5/10/12）
+                  11. 最小真实可玩链路（≥ Issue 5/6.5/7/8/9/9.5/10/12，与条目头部 Blocked by 一致）
 ```
 
 `12. 输出隔离强化` 至少依赖 Issue 4、Issue 9、Issue 9.5 和 Issue 10，必须在 Issue 11 之前完成。

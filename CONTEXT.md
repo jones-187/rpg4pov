@@ -15,9 +15,6 @@ _Avoid_: 手动编辑 workspace、模板表单初始化、把初始化当作普�
 `story.md` frontmatter 中的 `initialized: true`（含 `initializedAt`）。**只由 Web 侧在初始化提交阶段写入**（与开场 history entry 同批提交/回滚），agent 无权写 story.md。API 层据此强制 create → init → turn 状态机：未初始化的故事拒绝回合（story-turn 400），已初始化的故事拒绝重复初始化（initialize 409）。
 _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状态
 
-### Opening Entry（开场条目）
-初始化成功后追加到 `turns/history.jsonl` 的第一条 Story History Entry：input 为用户设定，output 为开场主角视窗。刷新页面后开场仍展示；后续回合的 runner 读 history 即获得"玩家已见开场"的上下文。初始化失败时随回滚一起撤销，不会残留。
-
 ### Story Turn（故事回合）
 用户输入主角行动后，系统执行的一次完整处理周期。一个回合从用户输入开始，到返回主角可见输出结束。同一 storyId 的回合串行执行。
 
@@ -148,19 +145,19 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 rout
 _Avoid_: 版本历史、备份、checkpoint
 
 ### Turn History（回合历史）
-已提交的玩家可见故事时间线，存储在 `turns/history.jsonl`。条目类型包括 opening（开场内容，无玩家输入）和 turn（正常回合，有玩家输入）。由受信任的系统提交者（initializer 提交 opening，TurnOrchestrator 提交 turn）追加。Runner / Claude 不得直接修改。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
+已提交的玩家可见故事时间线，存储在 `turns/history.jsonl`。条目概念上包括 opening（开场内容，无主角行动输入，input 记录用户设定）和 turn（正常回合，有主角行动输入）。由受信任的系统提交者（初始化流程提交 opening，TurnOrchestrator 提交 turn）追加。Runner / Claude 不得直接修改。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
 _Avoid_: 完整世界状态、God State 日志、版本历史、checkpoint
 
 ### Story History Entry（故事历史条目）
-玩家可见时间线中的统一条目。分为两类：`opening`（开场内容，无玩家输入）和 `turn`（正常回合，有玩家输入）。不同写入者（initializer、TurnOrchestrator 等）通过统一的受信任提交接口追加条目，条目类型和写入者身份在条目中记录。GET story 和前端展示读取的是统一的玩家可见时间线。
+玩家可见时间线中的统一条目。概念上分为两类：`opening`（开场内容，无主角行动输入）和 `turn`（正常回合，有主角行动输入）。不同写入者（初始化流程、TurnOrchestrator 等）通过统一的受信任提交接口追加条目；当前落盘条目为统一结构（turnId/at/input/output），开场与回合由提交阶段和条目位置区分，带类型字段的条目结构是路线图方向、未落地。GET story 和前端展示读取的是统一的玩家可见时间线。
 _Avoid_: 伪造"开始故事"玩家输入、区分不出开场与回合、由 Runner 直接修改 committed history
 
 ### Opening Entry（开场条目）
-Story History Entry 的 `opening` 类型。由故事初始化流程（initializer）提交。不包含玩家 input，但必须进入完整的玩家可见历史、刷新后可恢复、出现在前端时间线的最前端。
-_Avoid_: 不写入玩家可见历史、用假 input 伪装成 turn、刷新后丢失
+Story History Entry 的 `opening` 概念类型：初始化成功后追加到 `turns/history.jsonl` 的第一条历史。由故事初始化流程提交（当前实现经 TurnOrchestrator 以 task="init" 执行）；input 字段记录用户的小场景设定（不是伪造的主角行动输入），output 为开场主角视窗。必须进入完整的玩家可见历史、刷新后可恢复、出现在前端时间线的最前端；后续回合的 runner 读 history 即获得"玩家已见开场"的上下文。初始化失败时随回滚一起撤销，不会残留。
+_Avoid_: 不写入玩家可见历史、用假 input 伪装成主角行动、刷新后丢失
 
 ### Turn Entry（回合条目）
-Story History Entry 的 `turn` 类型。由 TurnOrchestrator 在回合成功提交后追加。包含 entryId、at、input（玩家输入）和 output（主角可见输出）。
+Story History Entry 的 `turn` 类型。由 TurnOrchestrator 在回合成功提交后追加。包含 turnId、at、input（玩家输入）和 output（主角可见输出）。
 _Avoid_: runner 日志、诊断记录
 
 ### Trusted History Committer（受信任历史提交者）

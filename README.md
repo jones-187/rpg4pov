@@ -2,10 +2,10 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**Issue 6.5 已完成，进入故事初始化与叙事能力建设阶段**。
-首页可创建/列出故事，进入故事页发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出。
-已具备单回合安全边界（串行、快照、失败回滚）和内部随机工具 seam。
-已保存并展示玩家可见的回合历史（`turns/history.jsonl`）。
+当前仓库状态：**Issue 7（故事初始化）与 Issue 12 基础（输出格式校验）已实现，本机链路验证完成；待真实 Docker/Claude 环境做 HITL 验收，随后进入叙事能力建设（Issue 8 起）**。
+首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
+已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）。
+已保存并展示玩家可见的回合历史（`turns/history.jsonl`，含 opening 开场条目）。
 
 当前产品路线已明确：不预写固定剧本、章节、角色路线或结局；每个正常回合必须产生玩家可感知的有效变化。系统可以自动演出符合主角人格的低风险心理活动、台词和自然反应，但关键关系方向、重大承诺、信任、原谅和不可逆决定必须交还玩家。
 
@@ -70,7 +70,7 @@ docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
 
 ```
 {WORKSPACE_ROOT}/{storyId}/
-  story.md              # id / title / createdAt（front matter）
+  story.md              # id / title / createdAt（front matter）；初始化后追加 initialized / initializedAt（Web 侧写入，agent 无权写）
   rules.md              # 占位
   world.md              # 占位
   player.md             # 占位（主角）
@@ -80,7 +80,8 @@ docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
   logs/turn-errors.log  # 回合失败诊断日志（内部）
   turn/input.md         # 本回合主角输入
   turn/output.md        # 本回合固定主角可见输出（Web 唯一返回源）
-  turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5）
+  turn/done.json        # 运行成功标记（runner 回合成功后写入；orchestrator 以其磁盘存在性判定成败，回合前清理）
+  turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5；含 opening 与 turn 两类条目）
 ```
 
 主角可见输出只来自 `turn/output.md`；Web 不读取 agent stdout、logs、world、player、actors。
