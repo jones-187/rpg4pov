@@ -24,3 +24,6 @@ data
 .idea
 .vscode
 turn/
+
+# zcode session artifacts
+.zcode/
