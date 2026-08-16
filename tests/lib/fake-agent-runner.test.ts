@@ -156,6 +156,113 @@ describe("FakeAgentRunner init task (Issue 7)", () => {
   });
 });
 
+// --- Emotional Continuity：actor 卡情感结构 ---
+
+describe("FakeAgentRunner init: emotional continuity structure", () => {
+  const INIT_SETTING = "深夜的边境酒馆，主角是一名逃亡的炼金术士";
+
+  async function runInit(storyId: string) {
+    const runner = new FakeAgentRunner();
+    return runner.runTurn({
+      storyId,
+      workspaceDir: resolveWorkspaceDir(storyId),
+      playerInput: INIT_SETTING,
+      task: "init",
+      signal: AbortSignal.timeout(5000),
+    });
+  }
+
+  function actorPath(storyId: string) {
+    return path.join(root, storyId, "actors", "shopkeeper.md");
+  }
+
+  it("actor card contains Emotional Core with stable six fields", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const actor = await fs.readFile(actorPath(meta.storyId), "utf8");
+    expect(actor).toContain("## Emotional Core");
+    for (const field of [
+      "coreNeed",
+      "coreFear",
+      "vulnerability",
+      "defensivePattern",
+      "approachPattern",
+      "retreatPattern",
+    ]) {
+      expect(actor).toContain(field);
+    }
+  });
+
+  it("actor card contains directional Relationship State toward protagonist", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const actor = await fs.readFile(actorPath(meta.storyId), "utf8");
+    expect(actor).toContain("## Relationship State: 主角");
+    for (const field of [
+      "surfaceRelationship",
+      "privateMeaning",
+      "desiredPosition",
+      "perceivedPosition",
+      "approachImpulse",
+      "avoidanceImpulse",
+      "unresolvedQuestion",
+      "currentTension",
+      "recentEvidence",
+    ]) {
+      expect(actor).toContain(field);
+    }
+  });
+
+  it("actor card contains salient memory with event/meaning/impact", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const actor = await fs.readFile(actorPath(meta.storyId), "utf8");
+    expect(actor).toContain("## Emotionally Salient Memories");
+    expect(actor).toContain("event:");
+    expect(actor).toContain("meaning:");
+    expect(actor).toContain("impact:");
+  });
+
+  it("actor card contains enhanced Current Intent with trigger/conflict/restraint", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const actor = await fs.readFile(actorPath(meta.storyId), "utf8");
+    expect(actor).toContain("## Current Intent");
+    for (const field of [
+      "currentEmotion",
+      "emotionalTrigger",
+      "emotionalConflict",
+      "immediateGoal",
+      "hiddenIntent",
+      "restraint",
+      "behaviorStrategy",
+      "voice",
+    ]) {
+      expect(actor).toContain(field);
+    }
+  });
+
+  it("committed turn leaves actor card byte-identical (stable structures persist)", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const actorBefore = await fs.readFile(actorPath(meta.storyId), "utf8");
+
+    // 经完整 orchestrator 提交路径跑一个成功回合后，actor 卡（含全部稳定情感结构）
+    // 原样存在。Fake Agent 回合产物只写 turn/，不写 actors/——LLM 层
+    // "不覆盖稳定结构"由 prompt 契约保证；失败回合的污染由快照/回滚
+    // 撤销（见 turn-orchestrator.test.ts 的 emotional structure rollback 用例）。
+    const runner = new FakeAgentRunner();
+    await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "向店主打听门外的斗篷人",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    expect(await fs.readFile(actorPath(meta.storyId), "utf8")).toBe(actorBefore);
+  });
+});
+
 // --- Issue 10：固定交互状态 ---
 
 describe("FakeAgentRunner interaction.json (Issue 10)", () => {

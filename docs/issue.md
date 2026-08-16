@@ -776,6 +776,38 @@ Issue 9 引入了 Authored Protagonist Runtime 和主角控制权边界；Issue 
 
 ------
 
+### 13. 人物情感连续性与关系状态（Emotional Continuity & Relationship State）
+
+**Type**: AFK
+**Blocked by**: Issue 8（Character Intent 基础）、Issue 9（主角运行时）
+**User stories covered**: 产品 PRD 叙事体验相关用户故事（NPC 有持续情感生命、关系渐进发展、主角有即时情绪但重大结论归玩家）
+**Status**: 实现完成（feat/emotional-continuity 分支）
+
+**问题根因**：Issue 8 的 Character Intent 只给了 NPC"每回合的当前状态"（currentEmotion/immediateGoal/hiddenIntent/voice），没有"历史来源"——情绪每回合重写且无触发源、无关系认知、无私人意义记忆，模型只能从"这回合该吃醋"倒推行为，导致"角色执行剧情"而非"角色从自己是谁推出反应"。同时 Protagonist Agency 只列禁止项，缺少"允许即时情绪"的澄清，主角被写成"愣了一下/没多想"的摄像头。
+
+**实现内容**：
+
+1. **Stable Emotional Core**（actor 卡新增稳定结构）：coreNeed / coreFear / vulnerability / defensivePattern / approachPattern / retreatPattern。初始化生成，不逐回合变化，言行必须与之一致。
+2. **Relationship State**（NPC→protagonist 方向性关系认知）：surfaceRelationship / privateMeaning / desiredPosition / perceivedPosition / approachImpulse / avoidanceImpulse / unresolvedQuestion / currentTension / recentEvidence（≤3 条）。保守更新，只认明确依据，记录"发生了什么+如何理解"而非抽象"好感提升"。
+3. **Emotionally Salient Memory**（event/meaning/impact 三要素）：只收改变关系认知/期待、造成伤害、建立特殊意义、影响未来选择、形成承诺/私人象征/长期误解/重要共同经历的事件；普通事件留在 history；≤5 条，超出压缩最旧的。
+4. **Enhanced Current Intent**：新增 emotionalTrigger / emotionalConflict / restraint / behaviorStrategy；原四字段保留。
+5. **NPC 情感推理内部链**（turn prompt）：Trigger → Meaning → Emotional Conflict → Strategy → Performance → Delta，过程不落盘、不进正文。
+6. **潜台词原则 + 情绪行为化**：真正想问的不等于问出口的（但性格直接/关系安全者可直接表达，不为潜台词说谜语）；"她有些吃醋"式标签句不得承担核心情感表达，情绪须造成可观察行为差异。
+7. **Protagonist Agency 澄清**：即时情绪（紧张/期待/失落/在意/轻微嫉妒等）属正常心理反应可直接写入；禁止的是重大心理结论与关系定案；"迟钝不等于没有情绪"；减少"愣了一下/没多想"万能安全表达。
+8. **初始化防恋爱默认**：不得因标签含恋爱/后宫/修罗场就让所有核心 NPC 默认喜欢主角；喜欢/依赖/嫉妒/爱由后续经历获得。
+9. **POV 契约修正**：初始化 prompt 原允许"第一人称/第三人称有限"与 PRD/回合 prompt 的"默认第一人称"冲突；统一为"默认第一人称、主角限知；用户设定显式指定 POV 时以其为 canon（记录于 Protagonist Core narrativeVoice）"。
+
+**防膨胀与兼容**：actor 卡分层（Emotional Core 稳定 / Relationship State 当前压缩态 / 情感记忆少量 / history 承担普通事件），不复制 story history；旧角色卡缺结构时按现有材料合理表现并在更新时补建，不报错、不做破坏性 migration。
+
+**非目标**（YAGNI，明确不做）：好感度/情绪数值系统、NPC↔NPC 关系矩阵、vector DB / embedding memory、Director Agent、多模型情绪裁判、sentiment classifier、自动恋爱路线规划、强制剧情 Beat。
+
+**人工回归场景**（自动测试覆盖 prompt 契约与结构落盘；以下场景需真实 runner 验收）：
+
+1. *重逢吃醋场景*：主角与 NPC A 大学存在未完成暧昧，三年未联系后重逢，A 看到主角帮年轻女同事叫车。期望：信息对 A 造成实际情绪影响、想知道女同事身份、存在明显 restraint、对白绕开真正问题（如"刚才那个女生也是你们组的？"）、行为/注意力/语气轻微变化；不应出现"她是谁/男的女的/你们什么关系"连续审问，不应以"她吃醋了/她发现自己还是喜欢他"代替行为表现，也不应完全无反应。情绪来源应是关系位置（三年未联系、没有资格直接问），而非"竞争女性出现"的模板反应。
+2. *主角不是摄像头场景*：主角与 NPC 长期一起加班、默认一起吃晚饭，某天 NPC 请假。允许写"点外卖习惯性选两份，到付款页才想起来""轻微失落""想发消息又没发"；不得自动写"主角终于意识到自己爱上她"。验证 Protagonist Agency ≠ 禁止即时情感。
+
+------
+
 ## 推荐第一轮执行范围
 
 第一轮 MVP 路线保持从基础架构到真实可玩链路的顺序，但在原 Issue 9 处拆分为运行时和反馈两个 Issue。这样既覆盖完整 Adaptive Authored Protagonist，又避免一个 Issue 同时承担主角表演、控制权、反馈、长期偏好和推测学习。

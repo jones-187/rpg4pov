@@ -71,6 +71,13 @@ describe("ClaudeCodeRunner full chain via API (Issue 8, fake-claude fixture)", (
     // canon 保留：fixture 从 prompt 抽取设定原文写入 player.md
     const player = await fs.readFile(path.join(wsDir, "player.md"), "utf8");
     expect(player).toContain(SETTING);
+    // Emotional Continuity：actor 卡四块情感结构经真实 spawn 链路落盘
+    const actor = await fs.readFile(path.join(wsDir, "actors", "keeper.md"), "utf8");
+    expect(actor).toContain("## Emotional Core");
+    expect(actor).toContain("## Relationship State: 主角");
+    expect(actor).toContain("## Emotionally Salient Memories");
+    expect(actor).toContain("## Current Intent");
+    expect(actor).toContain("restraint");
 
     expect((await getStory(meta.storyId))?.initialized).toBe(true);
     expect((await readTurnHistory(meta.storyId))!.length).toBe(1);

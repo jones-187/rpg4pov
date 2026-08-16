@@ -16,6 +16,8 @@ import { TURN_OUTPUT_HEADING } from "./turn-output";
  * Issue 7：task="init" 时写一套固定初始化产物
  * （world/player/rules/actors + 开场 output + done.json），
  * 用户设定原文写入 player.md（fake 层验证 canon 保留）。
+ * Emotional Continuity：init 产物 actor 卡含 Emotional Core / Relationship
+ * State / Emotionally Salient Memories / Current Intent 四块结构（fake 层验证落盘）。
  */
 export class FakeAgentRunner implements AgentRunner {
   async runTurn(req: TurnRequest): Promise<TurnResult> {
@@ -85,9 +87,51 @@ export class FakeAgentRunner implements AgentRunner {
       path.join(dir, "rules.md"),
       ["# 规则", "", "（Fake Agent 初始化）基础规则：不确定的判定交给随机工具。", ""].join("\n"),
     );
+    // 情感连续性结构（Emotional Continuity）：Emotional Core / Relationship State /
+    // Emotionally Salient Memories / Current Intent 四块，供回合 agent 读取更新。
     await fs.writeFile(
       path.join(dir, "actors", "shopkeeper.md"),
-      ["# 店主 玛尔塔", "", "表面：疲惫的中年妇人，话不多。", "私有记忆：她认得门外那个斗篷人的脸。", ""].join("\n"),
+      [
+        "# 店主 玛尔塔",
+        "",
+        "表面：疲惫的中年妇人，话不多。",
+        "私有记忆：她认得门外那个斗篷人的脸。",
+        "",
+        "## Emotional Core",
+        "coreNeed: 确认女儿能安全离开这片边境。",
+        "coreFear: 走私团伙的债永远还不清，最后拿人抵债。",
+        "vulnerability: 任何威胁到女儿的名字都会让她失控。",
+        "defensivePattern: 用沉默和疲惫当掩护，不解释自己的异常。",
+        "approachPattern: 通过多添一份汤、留一盏灯这类小事表达在意。",
+        "retreatPattern: 一旦被问紧就转身擦杯子，退回店主身份里。",
+        "",
+        "## Relationship State: 主角",
+        "surfaceRelationship: 刚入住一晚的陌生旅客。",
+        "privateMeaning: 一个可能的旁观者，也可能是还债的机会。",
+        "desiredPosition: 希望他是懂规矩、付现钱、不多问的过客。",
+        "perceivedPosition: 他在观察这间店，程度不明。",
+        "approachImpulse: 他看起来手头不紧，今晚的房钱是实在的。",
+        "avoidanceImpulse: 他若和门外那伙人有关系，靠近就是引火烧身。",
+        "unresolvedQuestion: 这个年轻人到底为什么在雨夜来这里。",
+        "currentTension: 债主的人就在街对面，而店里只有这一个客人。",
+        "recentEvidence: （初始：暂无。）",
+        "",
+        "## Emotionally Salient Memories",
+        "- event: 三天前债主当面摔了她的账本。",
+        "  meaning: 期限不是吓唬人的。",
+        "  impact: 她开始在夜里盘算把店押出去。",
+        "",
+        "## Current Intent",
+        "currentEmotion: 压着疲惫的警觉。",
+        "emotionalTrigger: 斗篷人今早又出现在街对面。",
+        "emotionalConflict: 想让客人尽快离开避嫌，又需要今晚的房钱。",
+        "immediateGoal: 让主角待在堂内、别去打听门外的事。",
+        "hiddenIntent: 摸清主角是不是那伙人带来的眼线。",
+        "restraint: 直接盘问会暴露她在怕什么。",
+        "behaviorStrategy: 用店主的日常招呼观察他的反应。",
+        "voice: 短句、不主动接话、把关键信息藏在抱怨里。",
+        "",
+      ].join("\n"),
     );
 
     const turnDir = path.join(dir, "turn");

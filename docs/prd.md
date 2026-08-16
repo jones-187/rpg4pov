@@ -119,6 +119,11 @@ P0 是第一版必须具备的能力，否则核心体验不成立。
 34. 当事件尚未到达真正决策点时，系统可以进入 Continuous Performance，而不是每段文字后强制玩家输入。
 35. Decision Point 只在关键控制权应交还玩家时出现，并应停在明确可回应状态。
 36. Suggestion Gate 只服务 Decision Point，建议数量允许为 0 到 4 个，始终保留自由输入。
+37. 重要 NPC 初始化必须包含 Emotional Core（coreNeed/coreFear/vulnerability/defensive/approach/retreat patterns）与对主角的初始 Relationship State，且初始关系不得因恋爱类故事标签默认为恋爱情感。
+38. 重要 NPC 必须维护 Emotionally Salient Memories（event/meaning/impact），普通事件留在 turn history，不写入 actor 卡。
+39. 回合生成对出场重要 NPC 遵循 Trigger→Meaning→Emotional Conflict→Strategy→Performance→Delta 的内部情感推理链，推理过程不写入任何玩家可见输出。
+40. Relationship State 只在有明确依据时保守更新，记录"发生了什么+角色如何理解"，不使用抽象好感结论；recentEvidence 与情感记忆数量有上限，actor 卡不得无限膨胀。
+41. 主角可以拥有即时情绪（紧张、期待、失落、在意、轻微嫉妒等），但爱/原谅/信任/放下等重大心理结论仍必须由玩家明确建立或交还决策点。
 
 #### P1 / Post-MVP
 
@@ -567,10 +572,14 @@ Internal NPC hidden intent and private state must not be rendered directly to th
 
 Important NPCs must not only passively answer the player or provide information. Before each turn, the system should consider relevant NPCs' minimal dynamic state:
 
-1. `currentEmotion`: The NPC's primary emotion right now.
-2. `immediateGoal`: What the NPC currently wants from the player, other characters or the current scene.
-3. `hiddenIntent`: The NPC's real purpose, need, worry or probe that they will not directly state.
-4. `voice`: How the NPC specifically speaks, including expression habits, directness level, avoidance patterns, humor style and forbidden generic expressions.
+1. `currentEmotion`: The NPC's primary emotion right now; multiple coexisting feelings are allowed.
+2. `emotionalTrigger`: What concrete event this turn triggered these feelings.
+3. `emotionalConflict`: The character's simultaneously conflicting desires right now.
+4. `immediateGoal`: What the NPC currently wants from the player, other characters or the current scene.
+5. `hiddenIntent`: The NPC's real purpose, need, worry or probe that they will not directly state.
+6. `restraint`: Why the NPC will not act directly on the hidden intent.
+7. `behaviorStrategy`: How the NPC plans to handle the conflict.
+8. `voice`: How the NPC specifically speaks, including expression habits, directness level, avoidance patterns, humor style and forbidden generic expressions.
 
 NPC dialogue and behavior should serve their own `immediateGoal`, not only:
 
@@ -593,6 +602,24 @@ NPCs may proactively:
 - Conceal information.
 - Expose vulnerability.
 - Take actions that differ from the player's goals.
+
+### Emotional Continuity Decisions（人物情感连续性）
+
+NPC 的言行应能从"她是谁、她经历过什么、她认为自己和主角是什么关系、她想得到什么、她怕失去什么"推导出来，而不是从"这回合需要什么剧情"倒推。为此核心 NPC 的 actor 卡在 Character Intent 之上分层维护：
+
+1. **Emotional Core（稳定情感核心）**：coreNeed、coreFear、vulnerability、defensivePattern、approachPattern、retreatPattern。初始化时生成，不应逐回合变化；只有重大成长或长期变化才允许修改，不得为剧情方便重写。同一事件面前不同角色的反应差异必须来自人物本身。
+2. **Relationship State（关系状态）**：NPC 对主角的方向性主观关系认知（surfaceRelationship、privateMeaning、desiredPosition、perceivedPosition、approachImpulse、avoidanceImpulse、unresolvedQuestion、currentTension、recentEvidence）。只做 NPC→protagonist 方向，不做 NPC↔NPC 关系图。
+3. **Emotionally Salient Memory（情感显著记忆）**：每条含 event（发生了什么）、meaning（她如何理解）、impact（为什么重要）。只记录改变关系认知、改变期待、造成明显伤害、建立特殊意义、影响未来选择、形成承诺或私人象征、产生长期误解、形成重要共同经历的事件；普通事件留在 turn history。
+4. **情感推理内部链**：每回合对出场的重要 NPC 内部依次确定 Trigger → Meaning → Emotional Conflict → Strategy → Performance → Delta；推理过程不写入输出、不落盘。
+5. **Relationship Delta 保守原则**：普通聊天不足以改变关系核心；只有明确依据（脆弱时陪伴、失约、发现隐瞒、首次求助、共同历险、真正被理解、关系身份变化、竞争者出现、重要承诺）才产生有意义变化，且记录"发生了什么+她如何理解"，不写"好感提升"式抽象结论。
+6. **增长上限**：recentEvidence ≤3 条、情感显著记忆 ≤5 条，超出时合并或总结压缩最旧的；actor 卡不复制 story history。
+7. **潜台词原则**：角色真正想问/想表达的不应总是等于说出口的话；但性格直接或关系安全的角色可以直接表达，不得为潜台词让所有人说谜语。行为首先符合角色。
+8. **情绪行为化**：情绪标签句（"她有些吃醋""心情很复杂"）不得承担核心情感表达；情绪应造成可观察的行为差异。
+9. **初始化防恋爱默认**：不得因故事标签含恋爱/后宫/修罗场就让所有核心 NPC 对主角产生恋爱情感；真正的喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得。
+10. **主角即时情绪**：Player Agency 禁止的是重大心理结论与关系定案，不是禁止主角产生即时情绪。紧张、期待、失落、被触动、在意、轻微嫉妒、想念、舍不得等属于正常即时心理反应，应写入内心独白；迟钝不等于没有情绪，主角不能被写成没有心理反应的摄像头。
+11. **叙事视角一致**：玩家可见叙事默认第一人称、主角限知；用户设定明确指定其他视角时以其为 canon（记录于 Protagonist Core 的 narrativeVoice），初始化与回合契约一致。
+12. **兼容**：旧 actor 卡缺少新结构时合理降级并在后续更新中补建，不报错、不做破坏性 migration。
+13. 明确不做：好感度/情绪数值系统、完整 NPC 关系图（本阶段）、vector DB / embedding memory、Director Agent、多模型情绪裁判、自动恋爱路线规划、强制剧情 Beat。
 
 ### Performance and Presentation Decisions
 

@@ -29,8 +29,24 @@ _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状�
 _Avoid_: 复述玩家输入、平级环境细化、无信息量身体/天气描写、同一情绪原地延长、只写得更长或更华丽
 
 ### Character Intent（角色意图）
-重要角色在当前回合中的最小动态状态，包括 `currentEmotion`、`immediateGoal`、`hiddenIntent` 和 `voice`。角色台词与行动应服务于自己的即时目标，而不只是回答玩家、提供说明或等待玩家推进。
-_Avoid_: NPC 被动应答器、万能解释员、围绕玩家服务的无目标角色
+重要角色在当前回合中的最小动态状态。基础字段为 `currentEmotion`、`immediateGoal`、`hiddenIntent`、`voice`；Emotional Continuity 起扩展为 `emotionalTrigger`（本回合触发源）、`emotionalConflict`（互相冲突的欲望）、`restraint`（为何不直接按 hiddenIntent 行动）、`behaviorStrategy`（处理冲突的行为策略）。角色台词与行动应服务于自己的即时目标，而不只是回答玩家、提供说明或等待玩家推进。
+_Avoid_: NPC 被动应答器、万能解释员、围绕玩家服务的无目标角色、无来源的每回合全新情绪
+
+### Emotional Core（稳定情感核心）
+每个重要 NPC 在 actor 卡中持有的稳定情感结构：`coreNeed`（人际关系中最深层想得到什么）、`coreFear`（最害怕发生什么）、`vulnerability`（什么最容易真正伤到她）、`defensivePattern` / `approachPattern` / `retreatPattern`（不安全、想靠近、想退缩时的行为模式）。初始化时生成，**不应逐回合变化**，只有重大成长或长期变化才允许修改；本回合言行必须与之一致——同一事件面前不同角色的反应差异来自人物本身，而不是剧情需要。
+_Avoid_: 每回合重写人格、为剧情方便改写恐惧与需求、把 Emotional Core 当小说正文
+
+### Relationship State（关系状态）
+NPC 对主角的**方向性**主观关系认知（NPC→protagonist；不做 NPC↔NPC 关系图）：`surfaceRelationship` / `privateMeaning` / `desiredPosition` / `perceivedPosition` / `approachImpulse` / `avoidanceImpulse` / `unresolvedQuestion` / `currentTension` / `recentEvidence`（≤3 条）。它回答"这个 NPC **认为自己**和主角是什么关系、想要什么位置、害怕什么位置"。更新必须保守：普通闲聊不足以改变关系核心，只有明确依据（脆弱时陪伴、失约、发现隐瞒、首次求助、共同历险、竞争者出现、重要承诺等）才产生有意义变化，且记录"发生了什么+她如何理解"，不写"好感提升"式抽象结论。
+_Avoid_: 好感度数值、每回合关系+1、抽象 delta、无依据的喜欢/信任升级
+
+### Emotionally Salient Memory（情感显著记忆）
+NPC 私有的长期心理记忆，每条含 `event`（发生了什么）/ `meaning`（她如何理解）/ `impact`（为什么重要、如何影响她）。只记录改变关系认知、改变期待、造成明显伤害、建立特殊意义、影响未来选择、形成承诺或私人象征、产生长期误解、形成重要共同经历的事件；普通事件留在 Turn History，不写入。数量有上限（≤5 条，超出时总结压缩最旧的），防止 actor 卡无限膨胀。
+_Avoid_: 把 story history 复制进 actor、无上限追加事件、只有事实没有意义的事件流水
+
+### Relationship Delta（关系增量）
+一个回合结束后对 Relationship State / recentEvidence / Emotionally Salient Memory 的有依据更新，是「NPC 情感推理」链（Trigger→Meaning→Emotional Conflict→Strategy→Performance→Delta）的收尾判断。没有足够依据时不更新。
+_Avoid_: 每回合自动加深感情、无证据的信任/依赖升级
 
 ### Performance（表演）
 把 Meaningful Change 和 Character Intent 渲染成玩家可见内容的呈现层。优先通过潜台词、反问、回避、打断、停顿、动作与台词张力、角色语言习惯、回调和选择表现情绪，而不是直接解释 NPC 的全部心理。
@@ -221,6 +237,14 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 - **Protagonist Control Boundary** 划分系统可自动演出与必须交还玩家的行为；系统可补全低风险表现方式，不能替玩家作关键关系、道德或不可逆决定。
 - **Explicit Feedback** 高于系统推测；本次纠正只影响当前生成，长期偏好写入 **Confirmed Adjustments**。
 - **Inner Monologue Guideline** 约束第一人称心理描写：应积极生成具体情绪和思考过程，不能长期停留在模糊中性表达，但不能擅自替玩家完成关键心理结论。
+- 概念分层（防混淆）：**Turn History** = 世界中发生了什么（玩家视角时间线）；**Emotionally Salient Memory** = 这个 NPC 如何理解某件过去事件；**Relationship State** = 这个 NPC 当前认为自己与主角是什么关系；**Character Intent** = 这个 NPC 此刻准备做什么。普通事件进 history，私人意义进 actor 卡，不互相复制。
+- 重要 NPC 的 actor 卡按 **Emotional Core**（稳定）→ **Relationship State**（当前压缩状态）→ **Emotionally Salient Memories**（少量长期记忆）→ **Character Intent**（每回合更新）分层；actor 卡保存"这个角色从经历中形成了什么心理结构"，不复制 story history。
+- 回合生成遵循「NPC 情感推理」内部链：Trigger → Meaning → Emotional Conflict → Strategy → Performance → **Relationship Delta**；推理过程不写入任何文件、不进正文。
+- **Emotional Core** 不得逐回合改写；**Relationship State** 与 **Emotionally Salient Memory** 只在有明确依据时更新（保守 delta），`recentEvidence` ≤3 条、情感记忆 ≤5 条。
+- NPC 私有情感状态（Emotional Core / Relationship State / 情感记忆）与 hiddenIntent 一样不得直接泄漏到 **Player-visible Output**，只能通过可观察言行间接呈现。
+- 主角即时情绪（紧张、期待、失落、在意、轻微嫉妒等）属于正常心理反应，可由系统写入内心独白；**Player Agency** 禁止的是重大心理结论与关系定案——迟钝不等于没有情绪，主角不是摄像头。
+- 叙事视角默认第一人称、主角限知；用户设定明确指定其他视角时以其为 canon（记录在 Protagonist Core 的 narrativeVoice），初始化与回合 prompt 契约一致。
+- 初始化不得因故事标签含恋爱/后宫/修罗场就默认所有核心 NPC 对主角产生恋爱情感；喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得。
 - **Logical Character Agent** 是 MVP 中角色代理的实现方式：逻辑角色视角和独立决策边界，不要求每个 NPC 独立进程或独立模型调用。
 - **Turn Interaction** 属于受控的玩家可见输出，被 snapshot/rollback 覆盖；缺失或格式错误时经 `sanitizeTurnInteraction` 降级为默认连续演出态，不从内部日志拼装。
 

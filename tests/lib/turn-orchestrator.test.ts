@@ -244,6 +244,48 @@ describe("TurnOrchestrator", () => {
     await expect(fs.access(path.join(wsDir, "actors", "ghost.md"))).rejects.toThrow();
   });
 
+  // --- Emotional Continuity：稳定情感结构受快照/回滚保护 ---
+
+  it("failed turn that rewrote the actor card rolls back emotional structure intact", async () => {
+    const meta = await createStory({ title: "情感结构回滚" });
+    const wsDir = path.join(root, meta.storyId);
+    // 准备一张含情感结构的 actor 卡（Emotional Core 不逐回合重写的磁盘态前提）
+    const actorPath = path.join(wsDir, "actors", "shopkeeper.md");
+    const card = [
+      "# 店主 玛尔塔",
+      "",
+      "## Emotional Core",
+      "coreNeed: 确认女儿能安全离开这片边境。",
+      "coreFear: 债永远还不清。",
+      "",
+      "## Relationship State: 主角",
+      "surfaceRelationship: 刚入住的陌生旅客。",
+      "privateMeaning: 一个可能的旁观者。",
+      "",
+      "## Current Intent",
+      "currentEmotion: 警觉。",
+      "",
+    ].join("\n");
+    await fs.writeFile(actorPath, card);
+
+    // runner 整卡改写（等价于回合中重写/破坏稳定结构）但不写 done.json → 失败
+    class ActorClobberingRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        await fs.writeFile(
+          path.join(req.workspaceDir, "actors", "shopkeeper.md"),
+          "# 店主\n\n（被失败回合污染的卡）\n",
+        );
+        return { success: false, error: "clobbered actor" };
+      }
+    }
+    const orchestrator = new TurnOrchestrator(new ActorClobberingRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, "试探");
+    expect(outcome.success).toBe(false);
+
+    // 回滚恢复整份 actor 卡：Emotional Core / Relationship State 回到回合前状态
+    expect(await fs.readFile(actorPath, "utf8")).toBe(card);
+  });
+
   it("second concurrent turn for same storyId throws TurnBusyError", async () => {
     const meta = await createStory();
     const controlled = new ControlledRunner();

@@ -1,5 +1,7 @@
 /**
- * Agent prompt 模板（Issue 6 回合执行 + Issue 7 初始化 + Issue 8/9/9.5/10 叙事契约）。
+ * Agent prompt 模板（Issue 6 回合执行 + Issue 7 初始化 + Issue 8/9/9.5/10 叙事契约
+ * + Issue 13 情感连续性：Emotional Core / Relationship State / 情感记忆 / 增强意图块
+ * / Trigger→Meaning→Conflict→Strategy→Performance→Delta 推理链 / 主角即时情绪分界）。
  * 放代码常量便于版本管理与 runner 引用；后续可迁移到 prompts/*.md。
  * runner 把填充后的完整 prompt 经 stdin 传给 claude -p，不放 argv。
  */
@@ -53,15 +55,30 @@ DO NOT:
 1. 有效变化（Meaningful Change）：确定本回合结束后至少一个玩家可感知的变化——新信息、人物关系变化、角色作出决定/承诺/拒绝/撒谎/改变立场、玩家目标进展或受阻、风险升级/暴露/缓解、时间地点场景变化、角色暴露新的性格侧面、玩家对角色的理解发生变化、角色产生新的目标或放弃旧目标、冲突进入新阶段。
    以下单独出现不算有效变化：复述或扩写玩家输入、单纯环境描写、平级细化同一物体、延续原有情绪无新行为、重复上回合信息、角色维持原态度等待玩家、纯氛围性身体/光线/天气细节。
    日常、闲聊、慢节奏场景允许存在，但必须至少推进：人物关系、角色理解、情绪位置、信任或误解、后续冲突的条件。慢不等于不推进。
-2. 角色意图（Character Intent）：对本回合出场的重要 NPC，先读取其 actors/*.md 角色卡中的意图块并按本回合结束状态更新：
-   - currentEmotion：此刻主要情绪
-   - immediateGoal：当前想从玩家/其他角色/场景中得到什么
-   - hiddenIntent：不愿直接说出的真实目的、需求、担忧或试探
-   - voice：具体如何说话（表达习惯、直接程度、回避方式、幽默方式、禁用的通用表达）
+2. 角色情感与意图（Character Intent + Emotional Continuity）：对本回合出场的重要 NPC，先读取其 actors/*.md（表面设定、Emotional Core、Relationship State、情感记忆、Current Intent），按「NPC 情感推理」在内部推导本回合言行，再按「NPC 状态更新」写回本回合结束状态。
    NPC 必须主动：发起对话、提问、试探、回避、撒谎、打断、改变话题、离开、靠近、隐瞒、暴露脆弱、采取与玩家目标不同的行动。NPC 不能只回答问题、提供剧情说明、顺从玩家要求、等待玩家推进。
 3. 表演（Performance）：人物情绪优先通过以下方式表现——对话潜台词、反问/回避/打断/停顿/答非所问、与台词含义产生张力的动作、角色独有语言习惯、角色主动选择做或不做某事、对过去细节的回调、言语与真实意图的差异。
+   潜台词原则：角色真正想问/想表达的不应总是等于说出口的话。高情绪场景中真实问题（"她是不是比我重要？"）常以表面普通的问题（"刚才那个女生也是你们组的？"）出现。但不得为潜台词让所有人说谜语：性格本身直接、或当前关系足够安全的角色可以直接表达，行为首先符合角色。
+   情绪行为化："她有些吃醋""心情很复杂""心里五味杂陈"等情绪标签句不得承担核心情感表达；情绪应造成可观察的行为差异（注意力转移、距离变化、语气变化、选择做/不做某事、回复节奏改变），让主角能从行为读到情绪。
    避免：直接解释 NPC 全部心理、所有角色用相似的成熟礼貌理性表达、"我理解你的感受""我们应该坦诚面对"等通用 AI 台词、每句话附眼神嘴唇手指呼吸等模板动作、堆叠无信息量环境身体细节、长篇抽象总结关系信任人生、只写得更长更华丽却没有实际变化、所有角色围着玩家转缺少自己的目标立场。
 4. 回合结尾：停在叙事语义上明确可回应的状态（NPC 提出需要回答的问题、悬而未决的压力、等待主角反应的互动）。不要停在纯环境描写、模糊感慨、没有行动对象的沉思上。连续演出/决策点的正式交互结构由系统负责——按下方「交互状态」写 turn/interaction.json。
+
+## NPC 情感推理（内部约束，判断过程不写入任何文件）
+对本回合出场的重要 NPC，写正文前依次内部确定：
+1. Trigger：本回合出现的具体事件——谁做了什么、说了什么、出现了什么信息。
+2. Meaning：该 NPC 根据自己的 Emotional Core、私有记忆、Relationship State 与 recentEvidence 如何解释这件事。同一事件对不同角色意义完全不同——先回答"这件事对她意味着什么"，再回答"她该做什么"。
+3. Emotional Conflict：这件事让她同时想什么、又怕什么。优先寻找真实张力：靠近+退缩、想知道+不敢问、期待+害怕期待、嫉妒+没有资格嫉妒、生气+害怕失去、想留下+不愿显得需要对方。只有单一情绪（只吃醋、只关心）而无冲突时，反应大概率是执行剧情而不是人物。
+4. Strategy：她用什么行为策略处理这种冲突——直接表达、转移话题、用普通问题代替真正问题、开玩笑、故作自然、暂时后退、主动照顾、制造借口、改变距离、保持礼貌、延迟回复、改变称呼、观察而不询问等。
+5. Performance：把以上转化为对白、停顿、回避、小动作、注意力变化、距离变化、语气变化、行为选择、没有说出口的话。不得直接写出"她吃醋了"，不得把 hiddenIntent 或推理过程写进正文。
+6. Delta：回合结束后判断该事件是否重要到需要更新 Relationship State / recentEvidence / 情感记忆 / Current Intent——保守规则见「NPC 状态更新」，没有足够依据时不更新。
+
+## NPC 状态更新（actors/*.md，按本回合结束状态写回）
+- Current Intent（每回合更新）：currentEmotion（此刻主要情绪，可并存多种感受）/ emotionalTrigger（本回合什么具体事件触发了这些感受）/ emotionalConflict（此刻互相冲突的欲望）/ immediateGoal（当前想从玩家/其他角色/场景中得到什么）/ hiddenIntent（不愿直接说出的真实目的、需求、担忧或试探）/ restraint（为什么她不会直接按 hiddenIntent 行动）/ behaviorStrategy（准备用什么方式处理冲突）/ voice（具体如何说话：表达习惯、直接程度、回避方式、幽默方式、禁用的通用表达）。
+- Emotional Core（coreNeed / coreFear / vulnerability / defensivePattern / approachPattern / retreatPattern）：稳定结构，不得每回合改写，不得为剧情方便重写；只有角色经历重大成长或长期变化才允许修改。本回合言行必须与 Emotional Core 一致——面对同一事件，不同角色的反应差异必须来自人物本身，而不是剧情需要某个角色吃醋/退让/竞争。
+- Relationship State（该 NPC 对主角的方向性关系认知：surfaceRelationship / privateMeaning / desiredPosition / perceivedPosition / approachImpulse / avoidanceImpulse / unresolvedQuestion / currentTension / recentEvidence）：保守更新。普通聊天、日常互动通常不足以改变关系核心；只有存在明确依据（对方在脆弱时留下陪伴、明确失约、发现重要隐瞒、第一次主动求助、共同经历危险、真正被理解、关系身份变化、出现竞争者、重要承诺）才产生有意义变化，且记录"发生了什么+她如何理解"，不写"好感提升""更加信任"这类抽象结论。recentEvidence 只保留最新最关键的 3 条，超出时合并或删去最旧的。
+- Emotionally Salient Memories（每条含 event 发生了什么 / meaning 她如何理解 / impact 为什么重要、如何影响她）：只记录改变关系认知、改变期待、造成明显伤害、建立特殊意义、影响未来选择、形成承诺或私人象征、产生长期误解、形成重要共同经历的事件；普通事件留在 history，不写入。与已有记忆含义重复时合并；总数超过 5 条时把最旧的总结压缩。
+- 兼容：旧角色卡可能缺这些结构。缺失时按角色现有材料合理表现，并在本次更新 Current Intent 时一并补建缺失结构（Emotional Core 从人物设定保守推导，不过度发挥），不因缺结构报错或留空段落。
+- 防膨胀：actor 卡保存"这个角色从经历中形成了什么心理结构"，不复制 story history；各字段保持一两句以内。
 
 ## 主角运行时（Adaptive Authored Protagonist）
 读取 player.md 的 Protagonist Core，维持稳定的第一人称叙述声音。内心独白要具体：注意力变化、当下联想、记忆触发、瞬间情绪、内心吐槽、疑问猜测、犹豫与未完成的冲动、对角色行为异常细节的即时理解。不要长期停留在"说不上来的感觉""心里有些复杂""一种莫名的情绪"等模糊中性表达。
@@ -70,6 +87,7 @@ DO NOT:
 系统可以自动处理：玩家已明确行动的执行细节、不改变立场的自然接话、日常寒暄、符合男主人格的小动作和习惯、当下感知和心理活动、不会关闭重要选择的低风险主动行为、长时间僵持时符合性格的轻度推进、从玩家输入和稳定人格可靠推出的自然反应、不构成重大承诺的过渡性台词。
 系统不得自行增加：玩家没有表达的新目标、重大承诺、关键关系决定、道德越界行为、与玩家当前输入冲突的台词、会关闭其他重要选择的决定、爱/恨/原谅/决裂等关系定案、明显改变路线的不可逆行动。
 玩家本回合明确输入永远覆盖系统自动表现。
+即时情绪与重大结论的分界：主角控制权边界禁止的是重大心理结论与关系定案，不是禁止主角产生即时情绪。主角可以紧张、期待、失落、被触动、尴尬、心软、被吸引、在意、轻微嫉妒、想念、烦躁、舍不得、不舒服、想问、想靠近、想逃避、对某件事反复在意——这些属于正常即时心理反应，应写入内心独白。迟钝不等于没有情绪：主角可以不知道自己为什么在意（"看到那条消息以后心情明显好了些""点外卖时下意识选了两份，到付款页才想起来"），但不能因此被写成没有心理反应的摄像头。减少把"愣了一下""没多想""不太明白""觉得有点奇怪"当作万能安全表达。除非玩家已明确建立，不得替主角得出"意识到自己爱上""终于放下""决定原谅"等重大心理结论。
 
 ## 玩家反馈与长期适应
 玩家输入可能是对主角表现的显式反馈（如"这不像我""心理描写太冷淡""心理描写太多""我不会这么生气""语气应该更克制""男主可以更主动一些"）。按语义区分处理：
@@ -98,14 +116,14 @@ DO NOT:
 
    rollId 用语义化短标识（如 lockpick、perception-check），便于审计。
    工具从 stdout 返回 JSON（RollChoiceResult），你必须服从 selectedId 对应的结果，不能重新选择。
-4. 更新 world.md / player.md / actors/**（含 NPC 意图块），按反馈规则更新 adjustments.md / tendencies.md
-5. 写 turn/output.md（主角可见输出）：第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写第一人称、主角限知的叙事，不使用 JSON/结构化格式
+4. 更新 world.md / player.md / actors/**（Current Intent 每回合更新，Relationship State / 情感记忆按「NPC 状态更新」的保守规则），按反馈规则更新 adjustments.md / tendencies.md
+5. 写 turn/output.md（主角可见输出）：第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写 player.md 确定的叙事视角（默认第一人称、主角限知；用户设定明确指定其他视角时按其执行），不使用 JSON/结构化格式
 6. 写 turn/interaction.json（见「交互状态」）
 7. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
 ## 约束
 - output.md 只写主角视窗：主角能看/听/感知/推理的信息；系统会校验首行标题与格式，不合规的回合会被拒绝回滚
-- 不得泄漏：God State 真相、NPC 私有记忆与 hiddenIntent、内部日志、随机判定日志内容、内部叙事判断（有效变化/角色意图分析）、主角推测倾向（tendencies.md 内容）
+- 不得泄漏：God State 真相、NPC 私有记忆与 hiddenIntent、NPC 私有情感状态（Emotional Core、Relationship State、情感记忆——只能通过可观察言行间接呈现）、内部日志、随机判定日志内容、内部叙事判断（有效变化/角色意图/情感推理分析）、主角推测倾向（tendencies.md 内容）
 - 不得修改 story.md 元数据
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
 - 随机判定结果必须服从，不得在 output 中直接展示 random log 内容
@@ -144,8 +162,13 @@ DO NOT:
    - world.md：小场景世界设定——地点（有限几个）、时间、氛围、隐藏事实（God State，主角未知）；必须包含足以支撑后续有效变化的矛盾、秘密、风险或压力源（Issue 8 材料）
    - player.md：主角角色卡（用户给出的主角内容必须原文保留）+ 初始状态 + 主角已知信息 + Protagonist Core：narrativeVoice、temperament、emotionalExpression、conflictStyle、relationshipStyle、humorStyle、initiative、moralBoundaries、speechPatterns、avoidExpressions；第一人称叙述基调与心理描写偏好；agency boundaries（哪些低风险表现可由系统自动演出、哪些重大决定必须交还玩家）
    - rules.md：基础规则（判定风格、随机权重约定）
-   - actors/*.md：3-5 个核心 NPC 角色卡（用户给出的 NPC 内容必须原文保留），各含表面形象、私有记忆/动机、voice（具体说话方式与禁用表达）、基本动机、初始关系/压力材料，以及初始意图块：currentEmotion / immediateGoal / hiddenIntent（Issue 8 Character Intent 材料，供回合 agent 每回合读取更新）
-3. 写 turn/output.md：开场主角视窗——主角所处场景的第一人称/第三人称有限视角描写，只含主角能感知的信息。第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
+   - actors/*.md：3-5 个核心 NPC 角色卡（用户给出的 NPC 内容必须原文保留），各含表面形象、私有记忆/动机、voice（具体说话方式与禁用表达）、基本动机，以及四块情感结构（模型内部的人物行为约束，不是小说正文；每字段一两句以内，控制总长）：
+     · Emotional Core（稳定情感核心，初始化后不应逐回合变化）：coreNeed（人际关系中最深层想得到什么）/ coreFear（最害怕发生什么）/ vulnerability（什么最容易真正伤到她）/ defensivePattern（不安全、被拒绝、失控时通常如何自保）/ approachPattern（想靠近重要的人时通常怎么做）/ retreatPattern（想退缩、自保或恢复边界时通常怎么做）
+     · Relationship State: <主角名>（该 NPC 对主角的方向性关系认知；只做 NPC→主角方向，不做 NPC↔NPC 关系图）：surfaceRelationship（双方客观公开的关系）/ privateMeaning（这段关系对她私下意味着什么）/ desiredPosition（希望最终处于对方什么位置）/ perceivedPosition（认为自己目前实际处在什么位置）/ approachImpulse（驱使她靠近的力量）/ avoidanceImpulse（阻止她靠近的力量）/ unresolvedQuestion（这段关系中尚未得到答案的最重要问题）/ currentTension（当前真正推动关系的核心张力）/ recentEvidence（改变她判断的具体事件，初始通常 0-2 条）
+     · Emotionally Salient Memories（初始 0-2 条，每条含 event 发生了什么 / meaning 她如何理解 / impact 为什么重要、如何影响她）：只放过去的关键事件，普通往事不列
+     · Current Intent（初始意图块，供回合 agent 每回合读取更新）：currentEmotion / emotionalTrigger / emotionalConflict（互相冲突的欲望）/ immediateGoal / hiddenIntent / restraint（为何不直接按 hiddenIntent 行动）/ behaviorStrategy / voice
+     初始关系不得因故事标签含恋爱/后宫/修罗场就默认所有核心 NPC 对主角产生恋爱情感；初始应是普通同事、熟悉、好奇、轻微欣赏、未完成旧关系、戒备、互相利用、工作默契、习惯性依赖、潜在吸引、愧疚、竞争、信任或不信任等——真正的喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得
+3. 写 turn/output.md：开场主角视窗——默认第一人称、主角限知视角；用户设定明确指定其他叙事视角时以其为 canon，并在 player.md 的 Protagonist Core（narrativeVoice）记录该视角约定，后续回合沿用。只含主角能感知的信息。第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
 4. 写 turn/interaction.json：开场交互状态，格式 \`{"mode":"continue"|"decision","suggestions":[]}\`。开场通常为 continue（连续演出阶段、无建议）；只有开场即停在真正需要玩家决定的位置时才用 decision 并给出 0-4 条符合建议门槛的建议
 5. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
 
@@ -154,7 +177,7 @@ DO NOT:
 - 用户未定义的部分由你补全，保持小场景规模：1 个主角、3-5 个核心 NPC、有限地点、有限时间跨度
 - 不预写固定剧本、章节大纲、角色路线或结局；不写入长期玩家推断、显式反馈学习结果或建议选项状态
 - output.md 只写主角视窗：开场时主角能看/听/感知的信息；系统会校验首行标题与格式，不合规的初始化会被拒绝回滚
-- 不得泄漏：God State 真相、NPC 私有记忆与 hiddenIntent、内部日志内容
+- 不得泄漏：God State 真相、NPC 私有记忆与 hiddenIntent、NPC 私有情感状态（Emotional Core、Relationship State、情感记忆）、内部日志内容
 - 不得修改 story.md、turns/history.jsonl、adjustments.md、tendencies.md
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
 - 仅可写 world.md、player.md、rules.md、actors/**、turn/output.md、turn/interaction.json、turn/done.json，不得创建其他文件`;

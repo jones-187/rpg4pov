@@ -6,6 +6,7 @@
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）。
 回合 prompt 已包含 Narrative Turn Contract（有效变化、NPC 意图、视觉小说式表演）、主角运行时控制权边界与心理描写规则、玩家反馈与长期适应（`adjustments.md` / `tendencies.md`）；回合交互状态（连续演出 / 决策点 + 0-4 条建议）经 `turn/interaction.json` 净化后返回，UI 提供"继续"按钮与建议填入。
+NPC 情感连续性（Issue 13）：核心 NPC 角色卡分层维护 Emotional Core（稳定情感核心）、Relationship State（对主角的方向性关系认知）、Emotionally Salient Memories（event/meaning/impact 私人意义记忆）与增强版 Current Intent（含 emotionalTrigger / emotionalConflict / restraint / behaviorStrategy）；回合生成遵循 Trigger→Meaning→Conflict→Strategy→Performance→Delta 内部推理链，关系状态只在有明确依据时保守更新。主角可拥有即时情绪，但重大心理结论仍由玩家决定。
 已保存并展示玩家可见的回合历史（`turns/history.jsonl`，含 opening 开场条目）。
 
 当前产品路线已明确：不预写固定剧本、章节、角色路线或结局；每个正常回合必须产生玩家可感知的有效变化。系统可以自动演出符合主角人格的低风险心理活动、台词和自然反应，但关键关系方向、重大承诺、信任、原谅和不可逆决定必须交还玩家。
