@@ -9,6 +9,7 @@ import {
   isValidStoryId,
   markStoryInitialized,
   readTurnOutput,
+  readRandomRollLines,
   readTurnDone,
   clearTurnDone,
   writeTurnInput,
@@ -193,6 +194,26 @@ describe("turn input/output/done files", () => {
   });
   it("readTurnOutput returns null for unknown story", async () => {
     expect(await readTurnOutput("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+
+  // --- Issue 9：随机日志读取（供 orchestrator 输出隔离校验） ---
+  it("readRandomRollLines returns [] when random-rolls.jsonl does not exist", async () => {
+    const meta = await createStory();
+    expect(await readRandomRollLines(meta.storyId)).toEqual([]);
+  });
+  it("readRandomRollLines returns trimmed non-empty lines", async () => {
+    const meta = await createStory();
+    const line1 = JSON.stringify({ rollId: "perception-check", selectedId: "success" });
+    const line2 = JSON.stringify({ rollId: "lockpick", selectedId: "fail" });
+    await fs.writeFile(
+      path.join(root, meta.storyId, "logs", "random-rolls.jsonl"),
+      `${line1}\n${line2}\n\n`,
+      "utf8",
+    );
+    expect(await readRandomRollLines(meta.storyId)).toEqual([line1, line2]);
+  });
+  it("readRandomRollLines returns [] for invalid storyId", async () => {
+    expect(await readRandomRollLines("not-a-uuid")).toEqual([]);
   });
 
   it("readTurnDone returns null when done.json does not exist", async () => {

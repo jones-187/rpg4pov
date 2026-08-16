@@ -1,9 +1,10 @@
 import { promises as fs } from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { isValidStoryId } from "./workspace";
+import { isValidStoryId, RANDOM_ROLLS_LOG } from "./workspace";
 
-export const RANDOM_ROLLS_LOG = "random-rolls.jsonl";
+// 文件名常量定义在 workspace.ts（避免循环依赖），此处 re-export 保持既有导入不变
+export { RANDOM_ROLLS_LOG };
 
 export type RandomSource = "crypto" | "injected";
 

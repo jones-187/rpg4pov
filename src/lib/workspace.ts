@@ -118,6 +118,33 @@ export async function readTurnOutput(storyId: string): Promise<string | null> {
   }
 }
 
+/**
+ * 随机判定日志文件名（logs/random-rolls.jsonl）。
+ * 定义在 workspace（random-tool 单向依赖 workspace，反向会成环）；random-tool re-export。
+ */
+export const RANDOM_ROLLS_LOG = "random-rolls.jsonl";
+
+/**
+ * 读取随机判定日志的原始行（Issue 9）。
+ * 供 orchestrator 做输出隔离校验：output.md 逐字包含某行 = 内部日志外泄。
+ * 文件不存在/非法 storyId 返回 []；空行忽略，行内容 trim。
+ */
+export async function readRandomRollLines(storyId: string): Promise<string[]> {
+  if (!isValidStoryId(storyId)) return [];
+  try {
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(storyId), "logs", RANDOM_ROLLS_LOG),
+      "utf8",
+    );
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+  } catch {
+    return [];
+  }
+}
+
 export async function writeTurnInput(storyId: string, input: string): Promise<void> {
   if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
   await fs.writeFile(
