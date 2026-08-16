@@ -42,6 +42,54 @@ describe("ClaudeCodeRunner", () => {
     expect(calls[0].opts.cwd).toBe(resolveWorkspaceDir(meta.storyId));
   });
 
+  it("task 未设置或 turn 时使用回合 prompt（Issue 7 回归）", async () => {
+    const meta = await createStory();
+    const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+    const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+    await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "推开木门",
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(calls[0].opts.stdinData).toContain("回合执行 agent");
+    expect(calls[0].opts.stdinData).not.toContain("初始化 agent");
+  });
+
+  it("task=init 时 stdinData 为初始化 prompt（含设定与 canon 指令）", async () => {
+    const meta = await createStory();
+    const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+    const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+    await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "深夜酒馆，主角是逃亡炼金术士",
+      task: "init",
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(calls[0].opts.stdinData).toContain("初始化 agent");
+    expect(calls[0].opts.stdinData).toContain("深夜酒馆，主角是逃亡炼金术士");
+    expect(calls[0].opts.stdinData).toContain("canon");
+    expect(calls[0].opts.stdinData).not.toContain("回合执行 agent");
+  });
+
+  it("注入单参数 promptTemplate 仍兼容（task 参数被忽略）", async () => {
+    const meta = await createStory();
+    const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+    const runner = new ClaudeCodeRunner({
+      spawnFn: spawn,
+      promptTemplate: (input) => `CUSTOM:${input}`,
+    });
+    await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "测试输入",
+      task: "init",
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(calls[0].opts.stdinData).toBe("CUSTOM:测试输入");
+  });
+
   it("env 白名单传递，不含全量 process.env，含 ANTHROPIC_API_KEY/PATH/HOME/NODE_ENV/TMPDIR/USE_BUILTIN_RIPGREP", async () => {
     const meta = await createStory();
     // 测试设置的 env 必须在 finally 中清理，避免断言失败时泄漏到后续测试

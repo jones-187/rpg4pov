@@ -1,8 +1,13 @@
 import { spawn as realSpawn, type ChildProcess } from "node:child_process";
-import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
-import { buildPrompt } from "./claude-prompt";
+import type { AgentRunner, RunnerTask, TurnRequest, TurnResult } from "./agent-runner";
+import { buildPrompt, buildInitPrompt } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
+
+/** 默认 prompt 选择：task=init 用初始化模板，否则用回合模板（Issue 7） */
+function defaultPromptTemplate(input: string, task: RunnerTask): string {
+  return task === "init" ? buildInitPrompt(input) : buildPrompt(input);
+}
 
 /** spawn 函数签名（用于依赖注入测试） */
 export type SpawnFn = (
@@ -81,22 +86,24 @@ const SIGKILL_GRACE_MS = 5_000;
 export class ClaudeCodeRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly claudePath: string;
-  private readonly promptTemplate: (playerInput: string) => string;
+  private readonly promptTemplate: (input: string, task: RunnerTask) => string;
 
   constructor(opts?: {
     spawnFn?: SpawnFn;
     claudePath?: string;
-    promptTemplate?: (playerInput: string) => string;
+    /** 注入自定义模板时单参数函数仍兼容（task 被忽略） */
+    promptTemplate?: (input: string, task: RunnerTask) => string;
   }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.claudePath = opts?.claudePath ?? DEFAULT_CLAUDE_PATH;
-    this.promptTemplate = opts?.promptTemplate ?? buildPrompt;
+    this.promptTemplate = opts?.promptTemplate ?? defaultPromptTemplate;
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     req.signal.throwIfAborted();
 
-    const prompt = this.promptTemplate(req.playerInput);
+    const task: RunnerTask = req.task ?? "turn";
+    const prompt = this.promptTemplate(req.playerInput, task);
 
     // 构造 spawn opts，abort listener 通过 opts._child kill 子进程
     const spawnOpts: SpawnOpts = {

@@ -86,3 +86,72 @@ describe("FakeAgentRunner", () => {
     expect(await fs.readFile(path.join(root, meta.storyId, "logs", ".gitkeep"), "utf8")).toBe(logsBefore);
   });
 });
+
+describe("FakeAgentRunner init task (Issue 7)", () => {
+  const INIT_SETTING = "深夜的边境酒馆，主角是一名逃亡的炼金术士，身边带着一只会说话的猫";
+
+  async function runInit(storyId: string) {
+    const runner = new FakeAgentRunner();
+    return runner.runTurn({
+      storyId,
+      workspaceDir: resolveWorkspaceDir(storyId),
+      playerInput: INIT_SETTING,
+      task: "init",
+      signal: AbortSignal.timeout(5000),
+    });
+  }
+
+  it("writes initialized conceptual documents", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const dir = path.join(root, meta.storyId);
+    const world = await fs.readFile(path.join(dir, "world.md"), "utf8");
+    const rules = await fs.readFile(path.join(dir, "rules.md"), "utf8");
+    const actor = await fs.readFile(path.join(dir, "actors", "shopkeeper.md"), "utf8");
+    // 覆盖占位内容
+    expect(world).toContain("世界设定");
+    expect(world).not.toContain("占位");
+    expect(rules).not.toContain("占位");
+    expect(actor).toContain("店主");
+  });
+
+  it("preserves user setting verbatim in player.md (canon)", async () => {
+    const meta = await createStory();
+    await runInit(meta.storyId);
+    const player = await fs.readFile(
+      path.join(root, meta.storyId, "player.md"),
+      "utf8",
+    );
+    expect(player).toContain(INIT_SETTING);
+    expect(player).not.toContain("占位");
+  });
+
+  it("writes opening protagonist view to turn/output.md and done marker", async () => {
+    const meta = await createStory();
+    const result = await runInit(meta.storyId);
+    const dir = path.join(root, meta.storyId);
+    expect(result.success).toBe(true);
+    const output = await fs.readFile(path.join(dir, "turn", "output.md"), "utf8");
+    expect(output).toContain("主角视窗");
+    expect(output).not.toContain("占位");
+    const done = JSON.parse(
+      await fs.readFile(path.join(dir, "turn", "done.json"), "utf8"),
+    );
+    expect(done.status).toBe("success");
+  });
+
+  it("does not modify story.md or turns/history.jsonl", async () => {
+    const meta = await createStory();
+    const storyBefore = await fs.readFile(
+      path.join(root, meta.storyId, "story.md"),
+      "utf8",
+    );
+    await runInit(meta.storyId);
+    expect(await fs.readFile(path.join(root, meta.storyId, "story.md"), "utf8")).toBe(storyBefore);
+    const history = await fs.readFile(
+      path.join(root, meta.storyId, "turns", "history.jsonl"),
+      "utf8",
+    );
+    expect(history).toBe("");
+  });
+});

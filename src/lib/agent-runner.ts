@@ -5,14 +5,23 @@
  * 不通过返回值传递内容——Web 只从 turn/output.md 读取主角可见输出。
  */
 
+/**
+ * Agent 执行的任务类型（Issue 7）。
+ * - "turn"：执行主角一回合（默认，行为与 Issue 3-6 相同）
+ * - "init"：根据用户设定初始化 Story Workspace（写 world/player/rules/actors + 开场 output）
+ */
+export type RunnerTask = "turn" | "init";
+
 /** 传给 AgentRunner 的回合请求 */
 export interface TurnRequest {
   /** 故事 ID（UUID v4） */
   storyId: string;
   /** workspace 绝对路径，runner 在此目录内读写 */
   workspaceDir: string;
-  /** 主角本回合输入（与 turn/input.md 内容一致，便利字段） */
+  /** 主角本回合输入（与 turn/input.md 内容一致，便利字段）；task="init" 时为用户设定 */
   playerInput: string;
+  /** 执行任务类型，默认 "turn"（Issue 7） */
+  task?: RunnerTask;
   /**
    * 回合超时信号（Issue 4）。
    * 由 Orchestrator 用 AbortSignal.timeout(ms) 创建。
