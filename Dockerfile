@@ -1,4 +1,5 @@
-# syntax=docker/dockerfile:1
+# 注：不用 `# syntax=docker/dockerfile:1` 前端——需额外拉取 docker/dockerfile 镜像，
+# 网络受限环境会卡构建；现有指令均为内置 BuildKit 前端支持的常规语法。
 
 # ---- deps ----
 FROM node:20-alpine AS deps
@@ -54,9 +55,12 @@ RUN apk add --no-cache ripgrep bash
 
 # 装 claude code CLI（固定版本，避免自动升级导致不兼容）
 # v1.0.0 不支持 --bare/--settings/精细路径 allowedTools，v2+ 支持更完善的权限管控
+# 锁 2.1.140：v2.1.142+ 会把 system 消息放进 messages 数组非开头位置，
+# 官方 API 接受，但第三方 Anthropic 兼容网关（new-api 等）会返回 400
+# "System message must be at the beginning"（社区已知问题，cc-switch#1921）
 # 使用淘宝 npm 镜像源
 RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g @anthropic-ai/claude-code@2.1.181
+    npm install -g @anthropic-ai/claude-code@2.1.140
 
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs \

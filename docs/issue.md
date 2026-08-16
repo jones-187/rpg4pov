@@ -13,7 +13,7 @@
 - ✅ 代码实现完成(5 个提交对应 plan 的 5 个 Task)
 - ✅ 代码评审通过:静态审查无缺陷,边界守得住(无 storyId/workspace/agent/随机/锁/回滚,均留给后续 issue)
 - ✅ Vitest API 契约测试 4/4 全绿(200/echo/空输入 400/坏 JSON 400)
-- ⏭️ 待验证:Docker 构建 + 容器内冒烟(`curl /` 返回 200、占位 `POST /api/story-turn` 返回 `playerResponse`、镜像内不含 `src`/`tests`/`docs`/`.git`)——本机无 Docker,需在有 Docker 的环境补跑
+- ✅ Docker 构建 + 容器内冒烟完成(WSL 内装 docker-ce 29.x,2026-08-16):镜像内无 `src`/`tests`/`docs`/`.git`,`GET /` 200,完整状态机冒烟(create→未初始化守卫 400→init→turn→continue→GET 恢复)全通过
 - ✅ 浏览器冒烟通过(Issue 8 期间补跑,dev server):故事显示区 + 输入框 + 发送按钮 + loading 态("处理中…")均有截图证据(gui-test-screenshots/)
 - ⚠️ 已知:本机 `pnpm build` 因 Windows 符号链接权限(`output:"standalone"` 的 trace 阶段)失败;按约定仅以 Docker 内表现为准,不作为阻塞项
 
@@ -69,7 +69,7 @@ Web 输入
 - ✅ 单元测试全绿：turn-lock（7）/ turn-snapshot（8）/ turn-error-log（4）/ orchestrator（11，含 rollback/timeout/lock）/ route（8）/ workspace（23）/ fake-agent-runner（4）
 - ✅ TypeScript 类型检查通过
 - ⏭️ 待验证：浏览器人工冒烟（失败回填——Fake Agent 下难触发，由代码审查保证）
-- ⏭️ 待验证：Docker 容器内冒烟（与本机无 Docker 同阻塞项，留 Issue 1 验证环境）
+- ✅ Docker 容器内冒烟完成（随 Issue 1 补跑，2026-08-16）
 
 **目标行为**：同一个 storyId 同一时间只能执行一个回合。每回合执行前创建快照。Fake Agent 成功时正常返回固定输出；Fake Agent 超时、失败、未生成固定输出或基础校验失败时，系统回滚到回合前状态，并向用户展示可重试的失败提示。
 
@@ -112,7 +112,8 @@ agent 不自己假装随机
 - ✅ ClaudeCodeRunner 实现：冷启动 `claude -p` 子进程，cwd=workspace，prompt 经 stdin 传递（避免 CLI 3s stdin 等待）
 - ✅ 受控权限：`/app/claude/settings.json` allow/deny（含 roll-choice CLI 包装器）、env 白名单传递、超时 SIGTERM→SIGKILL 渐进 kill
 - ✅ 单元测试（mock spawn）+ 集成测试（fake-claude fixture）全绿
-- ⏭️ 待验收：容器内真实 Claude Code CLI 跑通一个回合（凭证注入 + prompt 稳定性），与 Issue 11 的 HITL 验收合并
+- ✅ 容器内真实 Claude Code CLI 验收完成（2026-08-16，NewAPI 网关 + qwen-fp8）：init/turn/continue 全链路跑通
+- ⚠️ 版本锁 2.1.140：v2.1.142+ 会把 system 消息放进 messages 数组非开头位置，第三方 Anthropic 兼容网关（new-api 等）返回 400 "System message must be at the beginning"（社区已知问题）；官方 API 不受影响
 
 **目标行为**：Agent Runtime Adapter 增加 Claude Code CLI Runner。Web 层仍只依赖 Adapter，不直接感知 Claude Code。用户输入后，系统冷启动 Claude Code Runner，让它在当前 storyId 的 Story Workspace 内完成一个回合，并写入固定主角可见输出。
 
@@ -691,7 +692,15 @@ Issue 8 需要先让回合能产生有效变化和可回应状态；Issue 9 至�
 **Type**: HITL
 **Blocked by**: Issue 5, Issue 6.5, Issue 7, Issue 8, Issue 9, Issue 9.5, Issue 10, Issue 12
 **User stories covered**: 技术架构 PRD US 1-7, 50-60, 61-67, 72-91；产品 PRD 中主角视窗、NPC 私有记忆、随机、失败后果、第一人称主角、有效变化、连续演出、决策点和建议门槛相关 MVP 用户故事
-**Status**: 本机可验证部分完成（创建 → 初始化 → 回合 → "继续"/决策点建议链路已实现并有测试）；真实环境 HITL 验收待环境（无 Docker/claude CLI/API key）
+**Status**: 真实环境链路验收基本完成（2026-08-16，WSL docker-ce + NewAPI 网关 qwen-fp8 + claude CLI 2.1.140）
+- ✅ Docker 构建 + 镜像内容隔离（无 src/tests/docs/.git）
+- ✅ 凭证注入（.env → compose env_file → runner env 白名单），密钥不落日志/响应
+- ✅ 真实 init：Protagonist Core、4 张 NPC 卡（含意图块）、世界压力源、canon 保留、开场视窗
+- ✅ 真实 turn：第一人称限知、潜台词式表演、有效变化可感知
+- ✅ 真实 continue：连续演出推进至决策点，返回 4 条符合门槛的建议；刷新后 decision 状态与建议恢复
+- ✅ 泄漏哨兵检查：GET/POST 响应不含 隐藏事实/私有记忆/hiddenIntent/random-rolls/tendencies/密钥
+- ✅ Issue 12 格式契约真实输出零误杀（init+turn+continue 首行标题全部合规）
+- ⏭️ 剩余（主观体验类，需玩家长时间游玩）：叙事质量稳定性、prompt 长线表现、多故事并发体验
 - ✅ ClaudeCodeRunner API 全链路测试（tests/api/claude-chain.test.ts）：真实 spawn 路径 + fake-claude fixture 走 initialize → story-turn 完整链路（stdin prompt 注入、Issue 7 init 校验、Issue 12 输出契约、canon 保留、God State 不外泄）；fixture 增加初始化任务分支（按 prompt 写实概念文档、canon 原文进 player.md）
 - ✅ fake runner API 冒烟（dev server，18 项断言）：创建(201) → 未初始化守卫 400 → 初始化 → 409 防重复 → GET 刷新持久化（响应无隐藏事实/NPC 私有记忆字样）→ 第一回合 → history 2 条 → workspace 落盘 canon 保留
 - ✅ 浏览器 UI 冒烟（截图证据 gui-test-screenshots/）：首页创建表单 → 故事页初始化表单（空输入按钮禁用）→ 初始化后开场显示（首行标题契约正常剥离）→ 刷新开场仍在 → 第一回合 loading 态（“处理中…”）→ 两块历史渲染无异常
@@ -746,7 +755,7 @@ Issue 8 需要先让回合能产生有效变化和可回应状态；Issue 9 至�
 - ✅ API 层泄漏测试矩阵补全：GET /api/stories/{id}（world/actors/logs 哨兵不外泄）、initialize（playerResponse 唯一来源 + 隐藏事实/NPC 私有记忆不泄漏）、story-turn 与 initialize 失败路径（500 只回固定中文 + retryInput，内部 error 原因不外泄）
 - ✅ 全量测试 21 文件 244 用例全绿；tsc 通过
 - ⏭️ 不做语义级可见性/知识违规审查（产品 PRD controller 式内容过滤）——arch-prd 明确列为 P1
-- ⏭️ 真实 Claude runner 下格式契约的误杀率观察留 Issue 11 HITL
+- ✅ 真实 Claude runner 下格式契约零误杀（init/turn/continue 共 3 次真实回合，2026-08-16）
 
 **目标行为**：系统明确验证页面只展示固定 player response 和受控的 interaction state。即使 agent stdout、内部日志、God State、NPC Memory、random log、Narrative Turn Contract 内部判断、NPC hiddenIntent、主角推测倾向或 interaction metadata 中存在内容，也不会被 Web 返回给用户。固定输出缺失或格式明显不合规时，回合失败并回滚。
 

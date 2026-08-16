@@ -2,7 +2,7 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**Issue 7-10、9.5 与 Issue 12 基础+扩展已实现（叙事契约、主角运行时与控制权边界、反馈与长期偏好、Decision Points 与"继续"、交互状态隔离），本机链路验证完成；待真实 Docker/Claude 环境做 HITL 验收（Issue 11）**。
+当前仓库状态：**Issue 7-10、9.5 与 Issue 12 已实现并完成本机验证；真实环境链路验收完成（WSL Docker + NewAPI 网关 + claude CLI 2.1.140：init/turn/continue/决策点建议全链路跑通，输出隔离哨兵检查通过）**。剩余为长线主观体验类验收（叙事质量稳定性）。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，通过 Fake Agent 或 Claude Code Runner 返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚）、内部随机工具 seam 和输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）。
 回合 prompt 已包含 Narrative Turn Contract（有效变化、NPC 意图、视觉小说式表演）、主角运行时控制权边界与心理描写规则、玩家反馈与长期适应（`adjustments.md` / `tendencies.md`）；回合交互状态（连续演出 / 决策点 + 0-4 条建议）经 `turn/interaction.json` 净化后返回，UI 提供"继续"按钮与建议填入。
