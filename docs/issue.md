@@ -189,10 +189,19 @@ agent 不自己假装随机
 **Type**: AFK
 **Blocked by**: Issue 4
 **User stories covered**: 技术架构 PRD US 6-7, 35-39, 61-63；产品 PRD 中 God State / NPC Memory / Random Log 不对用户可见的故事
+**Status**: 实现 + 测试完成
+- ✅ 新增 `src/lib/turn-output.ts`「basic output validation」（US 45 / Decision 34）：存在/占位残留沿用 Issue 4 语义；新增格式粗判——首行必须是 `# 主角视窗` 标题（升格既有事实约定为契约）、长度失控上限（50k 字符）、正文为确凿 JSON 转储、逐字包含 `logs/random-rolls.jsonl` 行（内部日志外泄的确定性判据）
+- ✅ TurnOrchestrator 第 8 步接入校验（turn 与 init 共用），不合规 → failTurn 回滚（连本回合新增 random log 一并撤销）；原因串只进 TurnOutcome.error/错误日志
+- ✅ prompt 契约对齐：turn/init 两个模板写明首行标题要求与”系统会校验、不合规回滚”；与 fake runner 输出、前端 normalizeOutput 一致
+- ✅ stdout/stderr 隔离现状核实：runner 成功即丢弃 stdout（TurnResult 无内容字段），失败时脱敏截断后仅写 logs/turn-errors.log
+- ✅ API 层泄漏测试矩阵补全：GET /api/stories/{id}（world/actors/logs 哨兵不外泄）、initialize（playerResponse 唯一来源 + 隐藏事实/NPC 私有记忆不泄漏）、story-turn 与 initialize 失败路径（500 只回固定中文 + retryInput，内部 error 原因不外泄）
+- ✅ 全量测试 21 文件 244 用例全绿；tsc 通过
+- ⏭️ 不做语义级可见性/知识违规审查（产品 PRD controller 式内容过滤）——arch-prd 明确列为 P1
+- ⏭️ 真实 Claude runner 下格式契约的误杀率观察留 Issue 8 HITL
 
 **目标行为**：系统明确验证页面只展示固定 player response。即使 agent stdout、内部日志、God State、NPC Memory、random log 中存在内容，也不会被 Web 返回给用户。固定输出缺失或格式明显不合规时，回合失败并回滚。
 
-这个 issue 和 Issue 4 有关联，但更聚焦“主角视窗隔离”的产品风险，可以在真实 Runner 接入前后都跑。
+这个 issue 和 Issue 4 有关联，但更聚焦"主角视窗隔离"的产品风险，可以在真实 Runner 接入前后都跑。
 
 
 

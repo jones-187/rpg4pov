@@ -23,6 +23,7 @@ _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状�
 
 ### Player-visible Output（主角可见输出）
 回合完成后，用户能通过 Web 界面看到的内容。**只来自 `turn/output.md`**，不包含 agent stdout、内部日志、God State、NPC 私有记忆或随机判定日志。
+格式契约（Issue 9 起 orchestrator 强制校验，`src/lib/turn-output.ts`）：首行必须是 `# 主角视窗` 标题；长度失控、正文为 JSON 转储、逐字包含 random log 行都判"明显不合规"，回合失败回滚。语义级泄漏审查是 P1，不在此层。
 
 ## 随机相关
 
