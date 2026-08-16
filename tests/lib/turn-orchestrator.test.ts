@@ -4,7 +4,7 @@ import path from "node:path";
 import { TurnOrchestrator, TurnBusyError } from "@/lib/turn-orchestrator";
 import type { AgentRunner, TurnRequest, TurnResult } from "@/lib/agent-runner";
 import { FakeAgentRunner } from "@/lib/fake-agent-runner";
-import { createStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
+import { createStory, getStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot } from "@/lib/workspace";
 import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
 import { readTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
@@ -415,5 +415,105 @@ describe("TurnOrchestrator", () => {
     expect(outcome.turn!.input).toBe("测试返回");
     expect(outcome.turn!.output).toBe(outcome.playerResponse);
     expect(outcome.turn!.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  // --- Issue 7 新增测试 ---
+
+  it("regular turn (no task) does not mark story initialized (Issue 7 回归)", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    await orchestrator.executeTurn(meta.storyId, "普通回合");
+    const story = await getStory(meta.storyId);
+    expect(story?.initialized).toBe(false);
+  });
+
+  it("init task passes task to runner via TurnRequest", async () => {
+    const meta = await createStory();
+    const seen: Array<string | undefined> = [];
+    class RecordingRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        seen.push(req.task);
+        const turnDir = path.join(req.workspaceDir, "turn");
+        await fs.writeFile(path.join(turnDir, "output.md"), "开场");
+        await fs.writeFile(
+          path.join(turnDir, "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      }
+    }
+    const orchestrator = new TurnOrchestrator(new RecordingRunner());
+    await orchestrator.executeTurn(meta.storyId, "设定", { task: "init" });
+    expect(seen).toEqual(["init"]);
+  });
+});
+
+describe("TurnOrchestrator init task (Issue 7)", () => {
+  const SETTING = "雨夜旅店，主角是逃亡的炼金术士";
+
+  it("init success: appends opening to history and marks story initialized", async () => {
+    const meta = await createStory({ title: "初始化成功" });
+    const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+    const outcome = await orchestrator.executeTurn(meta.storyId, SETTING, { task: "init" });
+
+    expect(outcome.success).toBe(true);
+    expect(outcome.playerResponse).toContain("主角视窗");
+
+    // 开场作为第一条 history entry（input=设定，output=开场视窗）
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).not.toBeNull();
+    expect(history!.length).toBe(1);
+    expect(history![0].input).toBe(SETTING);
+    expect(history![0].output).toBe(outcome.playerResponse);
+
+    // story.md 被标记为已初始化
+    const story = await getStory(meta.storyId);
+    expect(story?.initialized).toBe(true);
+
+    // 快照被清理
+    const snapDir = path.join(resolveSnapshotsRoot(), meta.storyId);
+    await expect(fs.access(snapDir)).rejects.toThrow();
+  });
+
+  it("init failure: no history entry, story stays uninitialized", async () => {
+    const meta = await createStory();
+    const orchestrator = new TurnOrchestrator(new NoopRunner()); // 不写 done.json
+    const outcome = await orchestrator.executeTurn(meta.storyId, SETTING, { task: "init" });
+
+    expect(outcome.success).toBe(false);
+    const history = await readTurnHistory(meta.storyId);
+    expect(history).toEqual([]);
+    const story = await getStory(meta.storyId);
+    expect(story?.initialized).toBe(false);
+  });
+
+  it("markStoryInitialized failure: init fails and rolls back (no entry, not initialized, placeholders restored)", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+
+    const workspaceModule = await import("@/lib/workspace");
+    const markSpy = vi.spyOn(workspaceModule, "markStoryInitialized").mockRejectedValue(
+      new Error("disk full"),
+    );
+
+    try {
+      const orchestrator = new TurnOrchestrator(new FakeAgentRunner());
+      const outcome = await orchestrator.executeTurn(meta.storyId, SETTING, { task: "init" });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toContain("mark initialized failed");
+
+      // 无 history entry、未标记初始化
+      const history = await readTurnHistory(meta.storyId);
+      expect(history).toEqual([]);
+      const story = await getStory(meta.storyId);
+      expect(story?.initialized).toBe(false);
+
+      // workspace 回滚到占位骨架（fake init 写入的内容被撤销）
+      const world = await fs.readFile(path.join(wsDir, "world.md"), "utf8");
+      expect(world).toContain("占位");
+    } finally {
+      markSpy.mockRestore();
+    }
   });
 });

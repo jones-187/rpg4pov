@@ -1,6 +1,7 @@
-import type { AgentRunner, TurnResult } from "./agent-runner";
+import type { AgentRunner, RunnerTask, TurnResult } from "./agent-runner";
 import {
   clearTurnDone,
+  markStoryInitialized,
   readTurnDone,
   readTurnOutput,
   resolveWorkspaceDir,
@@ -50,7 +51,11 @@ export class TurnOrchestrator {
 
   constructor(private runner: AgentRunner) {}
 
-  async executeTurn(storyId: string, playerInput: string): Promise<TurnOutcome> {
+  async executeTurn(
+    storyId: string,
+    playerInput: string,
+    opts?: { task?: RunnerTask },
+  ): Promise<TurnOutcome> {
     // 0. 检查 workspace 是否被标记为 unsafe（上回合 rollback 失败残留）
     const unsafe = await readWorkspaceUnsafeMarker(storyId);
     if (unsafe) {
@@ -65,7 +70,7 @@ export class TurnOrchestrator {
     //    注意：锁在 snapshot 之前——并发拒绝不应留下半成品快照。
     const release = this.lock.acquire(storyId);
     try {
-      return await this.runWithSnapshot(storyId, playerInput);
+      return await this.runWithSnapshot(storyId, playerInput, opts?.task);
     } finally {
       release();
     }
@@ -74,6 +79,7 @@ export class TurnOrchestrator {
   private async runWithSnapshot(
     storyId: string,
     playerInput: string,
+    task?: RunnerTask,
   ): Promise<TurnOutcome> {
     // 2. 快照（lock 后第一步）——捕获"本回合开始前的完整提交态"（含上回合 done.json）。
     await createSnapshot(storyId);
@@ -84,11 +90,11 @@ export class TurnOrchestrator {
     // 4. 写入本次主角输入
     await writeTurnInput(storyId, playerInput);
 
-    // 5. 构造回合请求（含超时信号）
+    // 5. 构造回合请求（含超时信号）。task=init 时为初始化任务（Issue 7）。
     const workspaceDir = resolveWorkspaceDir(storyId);
     const timeoutMs = resolveTurnTimeoutMs();
     const signal = AbortSignal.timeout(timeoutMs);
-    const req = { storyId, workspaceDir, playerInput, signal };
+    const req = { storyId, workspaceDir, playerInput, task, signal };
     const startedAt = Date.now();
 
     // 6. 调用 runner（捕获异常，统一转失败）
@@ -143,6 +149,20 @@ export class TurnOrchestrator {
         `history append failed: ${appendErr instanceof Error ? appendErr.message : String(appendErr)}`,
         playerInput,
       );
+    }
+
+    // 10. Issue 7：初始化任务成功提交时标记 story.md（Web 侧权威）。
+    //     失败走 failTurn——回滚同时撤销 history entry，不会留下"已标记但未提交"状态。
+    if (task === "init") {
+      try {
+        await markStoryInitialized(storyId);
+      } catch (markErr) {
+        return await this.failTurn(
+          storyId,
+          `mark initialized failed: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
+          playerInput,
+        );
+      }
     }
 
     await deleteSnapshot(storyId);
