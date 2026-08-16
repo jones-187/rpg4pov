@@ -27,3 +27,6 @@ turn/
 
 # zcode session artifacts
 .zcode/
+
+# browser UI smoke evidence (Issue 8)
+gui-test-screenshots/

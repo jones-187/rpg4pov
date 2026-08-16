@@ -12,7 +12,7 @@
 - ✅ 代码评审通过:静态审查无缺陷,边界守得住(无 storyId/workspace/agent/随机/锁/回滚,均留给后续 issue)
 - ✅ Vitest API 契约测试 4/4 全绿(200/echo/空输入 400/坏 JSON 400)
 - ⏭️ 待验证:Docker 构建 + 容器内冒烟(`curl /` 返回 200、占位 `POST /api/story-turn` 返回 `playerResponse`、镜像内不含 `src`/`tests`/`docs`/`.git`)——本机无 Docker,需在有 Docker 的环境补跑
-- ⏭️ 待验证:浏览器人工冒烟(故事显示区 + 输入框 + 发送按钮 + loading 态)
+- ✅ 浏览器冒烟通过(Issue 8 期间补跑,dev server):故事显示区 + 输入框 + 发送按钮 + loading 态("处理中…")均有截图证据(gui-test-screenshots/)
 - ⚠️ 已知:本机 `pnpm build` 因 Windows 符号链接权限(`output:"standalone"` 的 trace 阶段)失败;按约定仅以 Docker 内表现为准,不作为阻塞项
 
 **目标行为**：用户能通过浏览器打开本地 Web 页面，看到故事显示区、输入框和发送按钮。提交输入后，后端返回一个占位故事响应。应用可以通过 Docker 单容器启动，并暴露 Web 端口。
@@ -177,6 +177,12 @@ agent 不自己假装随机
 **Type**: HITL
 **Blocked by**: Issue 5, Issue 6, Issue 7
 **User stories covered**: 技术架构 PRD US 1-7, 50-60, 61-67, 72-75；产品 PRD 中主角视窗、NPC 私有记忆、随机、失败后果相关 MVP 用户故事
+**Status**: 本机可验证部分完成；真实环境 HITL 验收待环境（无 Docker/claude CLI/API key）
+- ✅ ClaudeCodeRunner API 全链路测试（tests/api/claude-chain.test.ts）：真实 spawn 路径 + fake-claude fixture 走 initialize → story-turn 完整链路（stdin prompt 注入、Issue 7 init 校验、Issue 9 输出契约、canon 保留、God State 不外泄）；fixture 增加初始化任务分支（按 prompt 写实概念文档、canon 原文进 player.md）
+- ✅ fake runner API 冒烟（dev server，18 项断言）：创建(201) → 未初始化守卫 400 → 初始化 → 409 防重复 → GET 刷新持久化（响应无隐藏事实/NPC 私有记忆字样）→ 第一回合 → history 2 条 → workspace 落盘 canon 保留
+- ✅ 浏览器 UI 冒烟（截图证据 gui-test-screenshots/）：首页创建表单 → 故事页初始化表单（空输入按钮禁用）→ 初始化后开场显示（首行标题契约正常剥离）→ 刷新开场仍在 → 第一回合 loading 态（"处理中…"）→ 两块历史渲染无异常
+- ✅ 全量测试 22 文件 246 用例全绿；tsc 通过
+- ⏭️ 待真实环境验收（HITL，合并 Issue 1/4/6 的 Docker 遗留项）：Docker 构建 + 容器内冒烟、claude CLI 容器内可用性 + 凭证注入、真实 runner 初始化质量（设定 → 可玩 workspace）与故事可玩性主观判断、prompt 稳定性、Issue 9 格式契约在真实输出下的误杀率
 
 **目标行为**：用户从 Web 页面输入小场景设定，系统创建 storyId，初始化 Story Workspace，然后用户输入主角第一回合行动。真实 CLI agent 读取 workspace、必要时调用随机工具、更新故事文件、写入固定 player response，Web 页面展示主角视窗文本。
 
