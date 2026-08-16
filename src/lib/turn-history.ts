@@ -34,7 +34,7 @@ export async function readTurnHistoryRaw(storyId: string): Promise<string | null
   try {
     return await fs.readFile(resolveHistoryPath(storyId), "utf8");
   } catch (err) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
     }
     throw err;

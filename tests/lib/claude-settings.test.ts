@@ -51,6 +51,36 @@ describe("claude-settings", () => {
     expect(deny.some((r) => r.startsWith("Write(/app/data/workspaces/*/turns"))).toBe(true);
   });
 
+  it("review 修复：宽 allow 之下，所有受保护路径都有绝对形态 deny（不可被绝对调用绕过）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    const deny = parsed.permissions.deny as string[];
+    // story.md（agent 无权写）、turn/input.md（orchestrator 写入）
+    expect(deny).toContain("Write(/app/data/workspaces/*/story.md)");
+    expect(deny).toContain("Edit(/app/data/workspaces/*/story.md)");
+    expect(deny).toContain("Write(/app/data/workspaces/*/turn/input.md)");
+    expect(deny).toContain("Edit(/app/data/workspaces/*/turn/input.md)");
+    // 工作区内 .env / secrets 的绝对形态
+    expect(deny).toContain("Write(/app/data/workspaces/*/.env)");
+    expect(deny).toContain("Write(/app/data/workspaces/*/.env.*)");
+    expect(deny).toContain("Write(/app/data/workspaces/*/secrets/**)");
+    expect(deny).toContain("Read(/app/data/workspaces/*/.env)");
+  });
+
+  it("review 修复：绝对路径 Read 放行（不依赖 default 模式对只读工具的门控语义）", () => {
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    expect(parsed.permissions.allow).toContain("Read(/app/data/workspaces/**)");
+  });
+
+  it("绝对路径前缀单源化：settings 中不残留硬编码的散落副本", () => {
+    // 除 roll-choice 的 /app/cli 前缀外，其余 /app/ 绝对规则都应指向 /app/data/workspaces
+    const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
+    const rules = [...(parsed.permissions.allow as string[]), ...(parsed.permissions.deny as string[])];
+    const offenders = rules.filter(
+      (r) => r.includes("/app/") && !r.includes("/app/data/workspaces") && !r.includes("/app/cli/"),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("settings allow 含 Read/Write workspace 文件", () => {
     const parsed = JSON.parse(CLAUDE_SETTINGS_JSON);
     const allow = parsed.permissions.allow as string[];

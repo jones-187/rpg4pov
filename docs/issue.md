@@ -828,7 +828,7 @@ Agent 可以读取历史、生成候选正文与状态变化，但永远不是�
 
 **实现（双保险）**：
 
-1. **权限收紧（第一层）**：runner 由 `--permission-mode auto` 改为 `default`（经 claude CLI 2.1.140 实证：default 模式下 settings.allow 才是真白名单——未匹配调用一律拒绝，M2；deny 优先于 allow，M3）。settings.json：`turns/**` 的 Write/Edit 双形态（相对 `./` 与容器绝对路径）加入 deny；allow 补绝对路径写入面 `Write(/app/data/workspaces/**)`（真实 agent Write 调用 375/377 为绝对路径，M4+转录统计）。任意 Bash 不再可用，仅保留 `Bash(node /app/cli/roll-choice.js:*)`。
+1. **权限收紧（第一层）**：runner 由 `--permission-mode auto` 改为 `default`（经 claude CLI 2.1.140 实证：default 模式下 settings.allow 才是真白名单——未匹配调用一律拒绝，M2；deny 优先于 allow，M3）。settings.json：**所有 agent 不该写的路径**以双形态（相对 `./` 与容器绝对路径，前缀 `/app/data/workspaces` 单源常量）deny——`turns/**`（committed history）、`story.md`（agent 无权写）、`turn/input.md`（orchestrator 写入）、工作区内 `.env*`/`secrets/**`；allow 补绝对路径读写面 `Read/Write/Edit(/app/data/workspaces/**)`（真实 agent Write 调用 375/377 为绝对路径，M4+转录统计；复审修复：宽 allow 之下受保护路径必须同时有绝对形态 deny，否则相对 deny 会被绝对调用绕过）。任意 Bash 不再可用，仅保留 `Bash(node /app/cli/roll-choice.js:*)`。
 2. **Orchestrator 守卫（第二层，更重要）**：回合开始（快照后）记录 `turns/history.jsonl` 原文基准；agent 运行结束、orchestrator 正式 append 之前逐字比对（非行数——rewrite/truncate/伪造条目同拦）。不一致即 failTurn → 快照回滚整目录（含 history）→ 正式 turn 不提交。fail closed，不做"修复那一行再继续"。
 
 **验收事故回归测试**：Test A（append 伪造 turn）、Test B（rewrite 已有条目、行数不变）、Test C（伪造 turn-202 重复提交——本轮整体失败、无双提交）、Test D（正常回合恰好 +1 条，守卫不误伤）、truncate 清空拦截、settings 规则断言、runner default 模式断言。
