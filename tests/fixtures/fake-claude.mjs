@@ -65,6 +65,48 @@ async function main() {
   const turnDir = path.join(cwd, "turn");
   await fs.mkdir(turnDir, { recursive: true });
 
+  // Issue 8 链路测试：初始化任务（prompt 首行「初始化 agent」标识）。
+  // 与真实 runner 契约一致：写实概念文档、canon 设定原文进 player.md、
+  // 写开场 output（Issue 9 首行标题契约）+ done.json。
+  if (stdinData.includes("初始化 agent")) {
+    const settingMatch = stdinData.match(
+      /## 用户设定（canon，优先级最高）\n([\s\S]*?)\n## 工作流程/,
+    );
+    const setting = settingMatch ? settingMatch[1].trim() : "";
+    await fs.writeFile(
+      path.join(cwd, "world.md"),
+      [
+        "# 世界设定",
+        "",
+        "（fake-claude 初始化）浓雾封锁的海岬，废弃灯塔孤立在礁石上。",
+        "隐藏事实：灯塔顶层住着守塔人失明的女儿（主角未知）。",
+        "",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(cwd, "player.md"),
+      ["# 主角", "", "## 用户设定（canon）", "", setting, "", "初始状态：健康。", ""].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(cwd, "rules.md"),
+      ["# 规则", "", "（fake-claude 初始化）不确定判定交给随机工具。", ""].join("\n"),
+    );
+    await fs.mkdir(path.join(cwd, "actors"), { recursive: true });
+    await fs.writeFile(
+      path.join(cwd, "actors", "keeper.md"),
+      ["# 守塔人", "", "表面：沉默的老人。", "私有记忆：他知道雾里有什么。", ""].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(turnDir, "output.md"),
+      ["# 主角视窗", "", "（fake-claude 初始化开场）", "", "雾从海面漫上来，灯塔的门在你身后关上。", ""].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(turnDir, "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    process.exit(0);
+  }
+
   if (mode === "missing-output") {
     await fs.writeFile(
       path.join(turnDir, "done.json"),
