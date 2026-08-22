@@ -177,6 +177,23 @@ body {
   padding-left: 12px;
 }
 
+/* 进行中的"你"输入回显：略降存在感，落定后由 committed entry 恢复正常 */
+.turn-entry-preview .turn-input-content {
+  opacity: 0.75;
+}
+
+/* 打字机光标（叙事渐显） */
+.tw-caret {
+  color: var(--accent);
+  animation: tw-blink 0.9s steps(1) infinite;
+}
+
+@keyframes tw-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .turn-input-block,
 .turn-output-block {
   display: flex;

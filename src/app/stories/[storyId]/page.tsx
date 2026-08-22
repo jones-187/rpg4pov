@@ -23,6 +23,37 @@ interface TurnHistoryEntry {
   output: string;
 }
 
+/**
+ * 打字机渐显（VN 质感）：叙事预览到达后逐字浮现，点击任意位置立即显示全部。
+ * 只作用于预览；committed entry 全文直出（预览期已被读过，不重复动画）。
+ */
+function Typewriter({ text, charsPerTick = 3 }: { text: string; charsPerTick?: number }) {
+  const [shown, setShown] = useState(0);
+  const done = shown >= text.length;
+  useEffect(() => {
+    setShown(0);
+  }, [text]);
+  useEffect(() => {
+    if (done) return;
+    const id = setInterval(() => {
+      setShown((s) => Math.min(text.length, s + charsPerTick));
+    }, 50);
+    return () => clearInterval(id);
+  }, [text, done, charsPerTick]);
+  if (done) return <>{text}</>;
+  return (
+    <span
+      role="presentation"
+      onClick={() => setShown(text.length)}
+      title="点击显示全部"
+      style={{ cursor: "pointer" }}
+    >
+      {text.slice(0, shown)}
+      <span className="tw-caret" aria-hidden="true">▌</span>
+    </span>
+  );
+}
+
 /** 校验响应体/GET 中的 interaction 字段，失败降级为默认连续演出态 */
 function parseInteraction(data: unknown): TurnInteraction {
   return sanitizeTurnInteraction(data) ?? DEFAULT_TURN_INTERACTION;
@@ -110,6 +141,10 @@ export default function StoryPage() {
   const [pendingSince, setPendingSince] = useState<number | null>(null);
   // 叙事先行预览：回合 pending 期间轮询 turn-preview，叙事/选项组合完成即先显示
   const [preview, setPreview] = useState<{ narrative?: string; interaction?: TurnInteraction } | null>(null);
+  // 乐观回显：提交瞬间先显示"你"的输入（未提交态），落定后被 committed entry 取代
+  const [pendingInput, setPendingInput] = useState<string | null>(null);
+  // 预排队：等待期允许打好下一步，上一回合落定即自动发送（think/打字时间藏进生成时间）
+  const [queuedInput, setQueuedInput] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -117,6 +152,16 @@ export default function StoryPage() {
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [pendingSince]);
+
+  // 预排队自动开火：上一回合落定（loading=false）且已有排队输入时立即发送。
+  // 先清队列再提交、loading 同步置位，effect 依赖变化后条件即假——只开火一次
+  useEffect(() => {
+    if (loading || queuedInput === null || !initialized) return;
+    const text = queuedInput;
+    setQueuedInput(null);
+    void submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, queuedInput, initialized, storyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +225,10 @@ export default function StoryPage() {
     setLoading(true);
     setPendingSince(Date.now());
     setError(null);
+    // 乐观回显：继续命令显示固定标签（与 committed history 的 label 一致）
+    const echoText =
+      payload.input ?? (payload.command === "continue" ? "（继续）" : payload.setting) ?? "";
+    setPendingInput(echoText !== "" ? echoText : null);
     let pollAlive = true;
     const pollPreview = async () => {
       try {
@@ -236,9 +285,10 @@ export default function StoryPage() {
     } finally {
       pollAlive = false;
       if (pollTimer) clearInterval(pollTimer);
-      // 预览生命周期与回合一致：落定即撤（成功由 committed entry 取代，
+      // 预览与回显的生命周期与回合一致：落定即撤（成功由 committed entry 取代，
       // 失败回到错误态——1/6 口述 flake 重试期间用户看到的预览会被收回）
       setPreview(null);
+      setPendingInput(null);
       setLoading(false);
       setPendingSince(null);
     }
@@ -263,7 +313,13 @@ export default function StoryPage() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text) return;
+    // 等待期提交 → 预排队：上一回合落定即自动发送，think/打字时间藏进生成时间
+    if (loading) {
+      setQueuedInput(text);
+      setInput("");
+      return;
+    }
     await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""), true);
   }
 
@@ -315,15 +371,25 @@ export default function StoryPage() {
             </div>
           ))
         )}
-        {preview?.narrative && (
-          <div className="turn-entry turn-entry-preview" aria-label="本回合叙事预览（未提交）">
-            <div className="turn-output-block">
-              <h3 className="turn-block-title">主角视窗</h3>
-              <div className="turn-output-content">{normalizeOutput(preview.narrative)}</div>
-              {!preview.interaction && <p className="muted">生成交互建议…</p>}
-            </div>
+        {preview?.narrative || pendingInput !== null ? (
+          <div className="turn-entry turn-entry-preview" aria-label="本回合进行中（预览未提交）">
+            {pendingInput !== null && (
+              <div className="turn-input-block">
+                <h3 className="turn-block-title">你</h3>
+                <div className="turn-input-content">{pendingInput}</div>
+              </div>
+            )}
+            {preview?.narrative && (
+              <div className="turn-output-block">
+                <h3 className="turn-block-title">主角视窗</h3>
+                <div className="turn-output-content">
+                  <Typewriter text={normalizeOutput(preview.narrative)} />
+                </div>
+                {!preview.interaction && <p className="muted">生成交互建议…</p>}
+              </div>
+            )}
           </div>
-        )}
+        ) : null}
       </section>
 
       {!initialized ? (
@@ -340,16 +406,18 @@ export default function StoryPage() {
           </button>
         </form>
       ) : (
-        <form onSubmit={handleSubmit} className="input-form" aria-label="主角输入">
+        <>
+          <form onSubmit={handleSubmit} className="input-form" aria-label="主角输入">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="输入主角的行动或台词…"
+            placeholder={
+              loading ? "等待期间可先想好下一步，发送即自动排队…" : "输入主角的行动或台词…"
+            }
             rows={4}
-            disabled={loading}
           />
-          <button type="submit" disabled={loading || !input.trim()}>
-            {loading ? "处理中…" : "发送"}
+          <button type="submit" disabled={!input.trim()}>
+            {loading ? "排队发送" : "发送"}
           </button>
           {interaction.mode === "continue" && history.length > 0 && (
             <button type="button" onClick={handleContinue} disabled={loading}>
@@ -357,6 +425,12 @@ export default function StoryPage() {
             </button>
           )}
         </form>
+          {queuedInput !== null && (
+            <p className="muted" aria-live="polite">
+              已排队下一回合：{queuedInput}
+            </p>
+          )}
+        </>
       )}
       {loading && pendingSince !== null && !preview?.narrative && (
         <p className="muted" aria-live="polite">
