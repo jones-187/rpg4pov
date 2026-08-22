@@ -984,6 +984,40 @@ describe("TurnOrchestrator committed history isolation (Issue 14)", () => {
     expect(history!.filter((e) => e.input === INPUT).length).toBe(0);
   });
 
+  it("Test C2: agent 改写 story.md → 回合失败回滚（受保护路径守卫）", async () => {
+    const meta = await createStory();
+    const storyFile = path.join(root, meta.storyId, "story.md");
+    const before = await fs.readFile(storyFile, "utf8");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      const raw = await fs.readFile(path.join(dir, "story.md"), "utf8");
+      await fs.writeFile(path.join(dir, "story.md"), raw.replace("# 故事", "# 被篡改的故事"));
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("story.md mutated");
+    expect(await fs.readFile(storyFile, "utf8")).toBe(before);
+  });
+
+  it("Test C3: agent 改写 turn/input.md → 回合失败回滚（受保护路径守卫）", async () => {
+    const meta = await createStory();
+    const inputFile = path.join(root, meta.storyId, "turn", "input.md");
+
+    const runner = new HistoryPollutingRunner(async (dir) => {
+      await fs.writeFile(path.join(dir, "turn", "input.md"), "# 本回合输入\n\n被篡改的输入\n");
+    });
+    const outcome = await new TurnOrchestrator(runner).executeTurn(meta.storyId, "正常输入");
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("turn/input.md mutated");
+    // 回滚 = 回到回合开始前状态：input.md 恢复为占位（快照先于 writeTurnInput），
+    // 篡改内容不残留
+    const restored = await fs.readFile(inputFile, "utf8");
+    expect(restored).not.toContain("被篡改的输入");
+    expect(restored).toContain("占位");
+  });
+
   it("Test D: agent 不碰 history 的正常回合 → 恰好追加 1 条正式 turn（守卫不误伤）", async () => {
     const meta = await createStory();
     await appendTurnHistory(meta.storyId, {

@@ -121,6 +121,29 @@ export async function readTurnOutput(storyId: string): Promise<string | null> {
 }
 
 /**
+ * story.md 原文（性能优化分支：受保护路径隔离基准）。
+ * 供 orchestrator 在 runner 前后逐字比对，agent 改写 story.md 即判污染。
+ */
+export async function readStoryMdRaw(storyId: string): Promise<string | null> {
+  if (!isValidStoryId(storyId)) return null;
+  try {
+    return await fs.readFile(path.join(resolveWorkspaceDir(storyId), "story.md"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** turn/input.md 原文（隔离基准，同 readStoryMdRaw 语义） */
+export async function readTurnInputRaw(storyId: string): Promise<string | null> {
+  if (!isValidStoryId(storyId)) return null;
+  try {
+    return await fs.readFile(path.join(resolveWorkspaceDir(storyId), "turn", "input.md"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 随机判定日志文件名（logs/random-rolls.jsonl）。
  * 定义在 workspace（random-tool 单向依赖 workspace，反向会成环）；random-tool re-export。
  */

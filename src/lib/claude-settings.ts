@@ -3,14 +3,16 @@
  * 放容器受控路径 /app/claude/settings.json，不放 Story Workspace。
  * Dockerfile 构建阶段写入，运行时只读。
  *
- * permission 语义（Issue 14 经 claude CLI 2.1.140 实证）：
- * - deny 优先于 allow：`deny Bash` 会连 allow 的精确命令一起禁用（M3），
- *   所以"deny 一切 Bash + allow roll-choice"不可行；deny 用于精确封路径。
- * - auto 模式会自动放行一切未被 deny 的调用（含任意 Bash 写文件，M1）；
- *   default 模式下 settings.allow 才是真白名单——未匹配的调用一律拒绝（M2），
- *   runner 侧已配合改为 `--permission-mode default`。
- * - 真实 agent 的 Write 调用 375/377 使用绝对路径（M4 + 验收转录统计），
- *   相对 `./` 规则匹配不到绝对路径调用，故写入面同时提供两种形态。
+ * permission 语义（性能优化分支实测修正，2026-08）：
+ * - claude CLI 2.1.140 + 第三方网关环境下，permissions 的路径规则对 Write 调用
+ *   完全不匹配（相对 ./、绝对 /、glob ** 形式的 allow 与 deny 均无效）：
+ *   default 模式因此全拒（写入排队等确认直至空转退出），acceptEdits 连 deny
+ *   都无视。Issue 14 时期"双形态规则"从未真正生效。
+ * - 现行治理：runner 传 --tools=Read,Write（Bash 等工具对模型不存在）+
+ *   --permission-mode auto（放行读写）；orchestrator 独占文件（turns/**、
+ *   story.md、turn/input.md）由代码层基线比对守卫（见 turn-orchestrator 8.7）。
+ * - 本文件保留 env.USE_BUILTIN_RIPGREP 与规则文本：规则当前不生效但作为
+ *   预期写权面的文档留存，若未来 CLI 版本修复路径匹配可重新启用 default 模式。
  *
  * permission 语法遵循 Claude Code settings 规范：
  * - deny 优先于 allow

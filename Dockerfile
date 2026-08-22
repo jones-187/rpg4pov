@@ -62,10 +62,15 @@ RUN apk add --no-cache ripgrep bash
 RUN npm config set registry https://registry.npmmirror.com && \
     npm install -g @anthropic-ai/claude-code@2.1.140
 
+# 装 pi coding agent（回合执行 runner，性能优化分支）。
+# 锁 0.73.1：实测校准版本（3 工具并行写盘可靠性 + thinkingFormat qwen）。
+# 运行时由 app 从 ANTHROPIC_* 环境变量幂等生成 /home/nextjs/.pi/agent/models.json
+RUN npm install -g @mariozechner/pi-coding-agent@0.73.1
+
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs \
- && mkdir -p /app/data/workspaces /app/claude /home/nextjs/.claude \
- && chown -R nextjs:nodejs /app/data /app/claude /home/nextjs/.claude
+ && mkdir -p /app/data/workspaces /app/claude /home/nextjs/.claude /home/nextjs/.pi/agent \
+ && chown -R nextjs:nodejs /app/data /app/claude /home/nextjs/.claude /home/nextjs/.pi
 
 # 写受控 settings.json 到 /app/claude/settings.json（不放 workspace，运行时只读）
 # 内容在 builder 阶段从 dist/lib/claude-settings.js 导出——与 src/lib/claude-settings.ts 单一来源

@@ -127,14 +127,19 @@ export class ClaudeCodeRunner implements AgentRunner {
         "-p", // 非交互模式，从 stdin 读取 prompt
         "--output-format",
         "json",
-        // 权限通过 --settings + --permission-mode default 控制（Issue 14 收紧）：
-        // - settings.json 的 allow 列表在 default 模式下是真白名单——未匹配的
-        //   调用（含任意 Bash）一律拒绝；非交互 -p 无法弹权限请求。
-        //   此前 auto 模式会自动放行一切未被 deny 的调用，实测 qwen-fp8 曾借
-        //   任意 Bash 直接写 committed history（Issue 14 验收事故）。
-        // - deny 优先于 allow：turns/** 的 committed history 对写工具双形态封锁。
+        // 权限治理（性能优化分支实测修正：Issue 14 的 settings 路径规则
+        // 在 claude CLI 2.1.140 + 第三方网关环境下对 Write 调用完全不匹配——
+        // 相对/绝对/glob 形式的 allow 与 deny 均无效，default 模式因此全拒，
+        // acceptEdits 又连 deny 都无视）：
+        // - --tools=Read,Write 从工具集层面移除 Bash 等其余一切工具，
+        //   init 任务只需读占位骨架 + 写概念文档，Bash 对模型不存在
+        // - auto 模式自动放行 Read/Write（含绝对路径），不依赖规则匹配
+        // - orchestrator 独占文件（turns/**、story.md、turn/input.md）的保护
+        //   改由代码层强制：TurnOrchestrator 成功路径在提交前从快照恢复
+        //   受保护路径（restoreProtectedPaths），比 CLI 规则更强且可测试
         "--permission-mode",
-        "default",
+        "auto",
+        "--tools=Read,Write",
         "--settings",
         CLAUDE_SETTINGS_PATH,
       ];

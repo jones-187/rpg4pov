@@ -4,7 +4,9 @@ import {
   getStory,
   markStoryInitialized,
   readRandomRollLines,
+  readStoryMdRaw,
   readTurnDone,
+  readTurnInputRaw,
   readTurnOutput,
   resolveWorkspaceDir,
   validateInitWorkspace,
@@ -128,6 +130,14 @@ export class TurnOrchestrator {
     // 4. 写入本次主角输入（continue 命令时为系统指令文本）
     await writeTurnInput(storyId, runnerInput);
 
+    // 4.5 受保护路径隔离基准（性能优化分支扩展 Issue 14 守卫）：
+    //     story.md / turn/input.md 与 committed history 同为 orchestrator 独占。
+    //     CLI/pi 层的权限规则不可依赖（实测 2.1.140 + 网关环境对 Write 调用
+    //     不匹配），统一在提交前逐字比对，检出变更即整轮回滚。
+    //     基准在自己的合法写入（writeTurnInput）之后取。
+    const storyBaseline = await readStoryMdRaw(storyId);
+    const inputBaseline = await readTurnInputRaw(storyId);
+
     // 5. 构造回合请求（含超时信号）。task=init 时为初始化任务（Issue 7）。
     const workspaceDir = resolveWorkspaceDir(storyId);
     const timeoutMs = resolveTurnTimeoutMs();
@@ -202,6 +212,14 @@ export class TurnOrchestrator {
         "committed history mutated during turn",
         playerInput,
       );
+    }
+    const storyAfter = await readStoryMdRaw(storyId);
+    if (storyAfter !== storyBaseline) {
+      return await this.failTurn(storyId, "story.md mutated during turn", playerInput);
+    }
+    const inputAfter = await readTurnInputRaw(storyId);
+    if (inputAfter !== inputBaseline) {
+      return await this.failTurn(storyId, "turn/input.md mutated during turn", playerInput);
     }
 
     // 9. 成功：append history → 删除快照 → 返回 committed entry

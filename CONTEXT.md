@@ -141,12 +141,20 @@ Web/API 层与具体 agent 实现之间的**稳定边界**。在代码中体现�
 Issue 3 引入的验证用 Agent Runner 实现。不接入真实大模型，读取主角输入后生成固定格式输出，用于跑通架构闭环。是临时验证组件，非永久产品运行时。
 
 ### Claude Code Runner（Claude Code 运行器）
-Issue 6 引入的首个真实 Agent Runner 实现。通过冷启动 `claude` CLI 子进程在 Story Workspace 内执行一个回合，让 CLI 自主读 workspace 文件、按 prompt 指令写 `turn/output.md` 与 `turn/done.json`。是 MVP 验证用运行时，非永久产品运行时——arch-prd 明确 Claude Code Runner 是 validation runtime，未来可替换为 Custom Story Agent Runner、SDK Runner 或 HTTP Agent Service Runner。
-_Issue 14 起权限模式_：`--permission-mode default` + 受控 settings.json——allow 列表为真白名单（未匹配调用一律拒绝），`turns/**`/`story.md`/`turn/input.md` 等受保护路径以相对+绝对双形态 deny；此前 auto 模式会自动放行一切未被 deny 的调用（实测被用于绕写 committed history）。committed history 的最终保障是 orchestrator 守卫（见 Trusted History Committer），权限层只是纵深防御。
-_Avoid_: 永久 agent、产品运行时、会话型 agent、auto 权限模式回归、以权限层替代 orchestrator invariant
+Issue 6 引入的首个真实 Agent Runner 实现。通过冷启动 `claude` CLI 子进程在 Story Workspace 内执行任务，让 CLI 自主读 workspace 文件、按 prompt 指令写产物。性能优化分支（2026-08）起**专职 Story Initialization**——开放性多文件创作（每故事一次、延迟不敏感）仍是 agentic 探路的甜区；Story Turn 已迁移到 Pi Runner。是 MVP 验证用运行时，非永久产品运行时。
+_Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.140 + 第三方网关环境下 settings 的路径权限规则对 Write 调用完全不匹配（相对/绝对/glob 的 allow 与 deny 均无效），改为 `--tools=Read,Write`（Bash 等工具对模型不存在）+ `auto` 模式；受保护路径的最终保障是 orchestrator 基线守卫（见 Trusted History Committer 与受保护路径守卫），权限层只是纵深防御。
+_Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
+
+### Pi Runner（pi 运行器）
+性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
+_Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash 工具
+
+### State Update Bundle（状态变更单）
+`turn/state-update.md`：Pi Runner 回合中全部状态文件变更的合并载体（每段 `=== FILE: 文件名 ===` + APPEND/REPLACE 行）。服务端解析并应用到白名单内文件（world/player/actors/adjustments/tendencies），白名单外或解析失败降级不致命。是回合内部中间产物，不是故事状态本身。
+_Avoid_: 让模型逐文件多次写盘、把 Bundle 当作新的故事状态源
 
 ### Runner 切换（Runner Selection）
-Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `claude`），默认 `fake`。Issue 7 起单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用 `claude`，避免无 `ANTHROPIC_API_KEY` 时普通开发跑不起来；启用 `claude` 经 env 覆盖或额外 compose 文件完成。vitest 契约测试始终用 `fake`，不依赖真实 CLI/凭证/网络。
+Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `claude`），默认 `fake`。`claude` 模式下按 Runner Task 分发：turn → Pi Runner，init → Claude Code Runner（性能优化分支）。单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用 `claude`，避免无凭证时普通开发跑不起来；启用经 env 覆盖或额外 compose 文件完成。vitest 契约测试始终用 `fake`，不依赖真实 CLI/凭证/网络。
 _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 route 自建 orchestrator 实例
 
 ### Runner Task（runner 任务类型）
@@ -155,7 +163,7 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 rout
 ## 回合状态相关
 
 ### Done Marker（运行成功标记）
-`turn/done.json` 文件，由 Agent Runner 在回合成功完成后写入。Turn Orchestrator 以此文件的**磁盘存在性和状态**为权威依据判断回合是否成功，不依赖 runner 的返回值。回合开始前由 Orchestrator 清理。
+`turn/done.json` 文件，回合成功完成后写入——Pi Runner 路径由 Web 侧在解析合并 State Update Bundle 之后写入；Claude Code Runner（init）路径由 agent 按 prompt 指令写入。Turn Orchestrator 以此文件的**磁盘存在性和状态**为权威依据判断回合是否成功，不依赖 runner 的返回值。回合开始前由 Orchestrator 清理。
 
 ### Turn Snapshot（回合快照）
 回合开始前由 Orchestrator 创建的整个 Story Workspace 目录副本，用于失败回滚。**不是 Story Workspace 的一部分，不是故事状态**——是瞬态恢复机制，存活期不超过一次回合。存放在 Story Workspace 目录之外（`{WORKSPACE_ROOT}/.snapshots/{storyId}/`），每故事单份、回合前覆盖。
