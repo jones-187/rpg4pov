@@ -145,7 +145,7 @@ describe("PiRunner", () => {
     const result = await runner.runTurn(turnRequest(meta.storyId, dir));
 
     expect(result.success).toBe(true);
-    expect(result.detail).toContain("state-update.md missing");
+    expect(result.detail).toContain("state-update.md absent or stale");
   });
 
   it("argv 正确：-p/--no-session/--model qwen-fp8，尾参含预注入上下文与玩家输入", async () => {
@@ -232,8 +232,12 @@ describe("PiRunner", () => {
 
     const result = await runner.runTurn(turnRequest(meta.storyId, dir));
 
-    expect(result.success).toBe(true);
-    expect(result.detail ?? "").not.toContain("early-exit fired"); // 走自然退出路径
+    // 看门狗不误杀（旧产物不触发早退）；且旧产物不得被当成本回合提交——
+    // 全部 attempt 均无新鲜产物 → 回合失败（旧产物蒙混提交是实测过的 bug）
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no turn output");
+    expect(result.detail ?? "").not.toContain("early-exit fired");
+    expect(result.detail ?? "").toContain("stale/missing");
   }, 10_000);
 
   it("随机判定：池注入 prompt，申报经服务端权威重算落账 random-rolls.jsonl", async () => {
@@ -472,5 +476,90 @@ describe("PiRunner 叙事先行预览", () => {
     expect(progress!.narrative).toContain("你推门进来");
     expect(progress!.narrative).not.toContain("第一次尝试的叙事");
     clearTurnProgress(meta.storyId);
+  });
+});
+
+// --- 旧产物新鲜度守卫（实测 bug 回归：口述失效 + 残留上回合产物） ---
+
+describe("PiRunner 旧产物守卫", () => {
+  it("口述失效且盘上残留上回合产物时拒绝旧产物并重试，不把旧 output 当本回合提交", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    // 预置"上一回合"产物（attempt 前已存在 → 进入 mtime 基线）
+    await fs.mkdir(path.join(dir, "turn"), { recursive: true });
+    const STALE_OUTPUT = "# 主角视窗\n\n上一回合的旧叙事，绝不能被当成本回合提交。\n";
+    const STALE_INTERACTION = JSON.stringify({ mode: "continue", suggestions: [] });
+    const STALE_STATE = STATE_UPDATE_MD;
+    await fs.writeFile(path.join(dir, "turn", "output.md"), STALE_OUTPUT);
+    await fs.writeFile(path.join(dir, "turn", "interaction.json"), STALE_INTERACTION);
+    await fs.writeFile(path.join(dir, "turn", "state-update.md"), STALE_STATE);
+
+    // attempt 1：口述失效（退出码 0 但不写盘）→ 旧产物必须被新鲜度门拦下
+    // attempt 2：正常写盘
+    const { spawn, calls } = makeSpawn([
+      null,
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": STATE_UPDATE_MD,
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    // 提交的是 attempt 2 的新产物，不是盘上残留的旧产物
+    expect(await fs.readFile(path.join(dir, "turn", "output.md"), "utf8")).toBe(OUTPUT_MD);
+  });
+
+  it("自然退出且产物齐且新鲜时不重试（新鲜度门不误伤正常路径）", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeSpawn([
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": STATE_UPDATE_MD,
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("残留旧 state-update 不重放：口述失效后的成功 attempt 只合并新 state-update", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.mkdir(path.join(dir, "turn"), { recursive: true });
+    // 旧的 REPLACE 指令若被重放，world.md 会被旧值覆盖
+    const STALE_STATE = ["=== FILE: world.md ===", "REPLACE: （占位）→ 旧值不应出现"].join("\n");
+    await fs.writeFile(path.join(dir, "turn", "output.md"), "# 主角视窗\n旧\n");
+    await fs.writeFile(path.join(dir, "turn", "interaction.json"), INTERACTION_JSON);
+    await fs.writeFile(path.join(dir, "turn", "state-update.md"), STALE_STATE);
+    const FRESH_STATE = [
+      "=== FILE: world.md ===",
+      "REPLACE: （占位：场景、地点、时间与隐藏事实。后续初始化 agent 填充。）→ 新值应当出现",
+    ].join("\n");
+
+    const { spawn } = makeSpawn([
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": FRESH_STATE,
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    const world = await fs.readFile(path.join(dir, "world.md"), "utf8");
+    expect(world).toContain("新值应当出现");
+    expect(world).not.toContain("旧值不应出现");
   });
 });

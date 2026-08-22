@@ -157,6 +157,37 @@ async function turnArtifactsComplete(workspaceDir: string, baselines: ArtifactMt
   return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, () => true);
 }
 
+/** mtime 严格新于基线；基线 null（attempt 前不存在）时任何存在都算新 */
+async function mtimeFresherThan(file: string, baseline: number | null): Promise<boolean> {
+  try {
+    const mtime = (await fs.stat(file)).mtimeMs;
+    return baseline === null || mtime > baseline;
+  } catch {
+    return false;
+  }
+}
+
+/** 成功路径新鲜度门：output（首行契约+非占位）与 interaction（可解析）均新于基线 */
+async function turnCoreArtifactsFresh(
+  workspaceDir: string,
+  baselines: ArtifactMtimes,
+): Promise<boolean> {
+  const turnDir = path.join(workspaceDir, "turn");
+  const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
+    const first = raw.split("\n").find((l) => l.trim() !== "");
+    return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
+  });
+  if (!outputOk) return false;
+  return freshFileOk(path.join(turnDir, "interaction.json"), baselines.interaction, (raw) => {
+    try {
+      JSON.parse(raw);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * 早退看门狗：三产物落盘并校验通过即 SIGTERM pi，砍掉第二次 LLM 往返
  * （实测那趟只为输出"回合完成"23 token，却要 prefill 4.3k fresh + 整套
@@ -272,6 +303,19 @@ export class PiRunner implements AgentRunner {
         diagnostics.push(`attempt ${attempt}: early-exit fired (artifacts complete, skip final round-trip)`);
       }
 
+      // 新鲜度守卫：口述失效模式（1/6 flake）下 pi 退出码 0 但不写盘，
+      // turn/ 下残留的是上一回合产物——不拦会把旧回合 output/interaction
+      // 当本回合提交（实测复现：连续两回合输出与上一回合一字不差）。
+      // output/interaction 必须新于 attempt 前基线；早退看门狗 fire 过的
+      // 天然新鲜，自然退出的在此复验。state-update 不设硬门（契约容许
+      // 降级缺席），但旧文件不得重放——下方合并步骤单独校验。
+      if (!watcher.fired && !(await turnCoreArtifactsFresh(req.workspaceDir, artifactBaselines))) {
+        diagnostics.push(
+          `attempt ${attempt}: pi exit=${result.code} but turn artifacts stale/missing (dictation flake?)`,
+        );
+        continue;
+      }
+
       const output = await readOutputIfExists(req.workspaceDir);
       if (output === null) {
         // "口述不写盘"失效模式：重试（最后一次尝试的诊断由下方汇总）
@@ -285,12 +329,20 @@ export class PiRunner implements AgentRunner {
       const mergeDiags: string[] = [];
       let rolls: RollDeclaration[] = [];
       try {
-        const raw = await fs.readFile(path.join(req.workspaceDir, "turn", "state-update.md"), "utf8");
-        const parsed = parseStateUpdate(raw);
-        rolls = parsed.rolls;
-        mergeDiags.push(...parsed.problems);
-        const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
-        mergeDiags.push(...applied.errors);
+        const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
+        const stateFresh = await mtimeFresherThan(stateUpdatePath, artifactBaselines.stateUpdate);
+        if (!stateFresh) {
+          // 缺席（容许，降级）或残留旧文件（禁止重放——旧状态重复 APPEND
+          // 会污染状态文件）。两种情况都跳过合并，只记诊断。
+          mergeDiags.push("state-update.md absent or stale; skipped (degraded)");
+        } else {
+          const raw = await fs.readFile(stateUpdatePath, "utf8");
+          const parsed = parseStateUpdate(raw);
+          rolls = parsed.rolls;
+          mergeDiags.push(...parsed.problems);
+          const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
+          mergeDiags.push(...applied.errors);
+        }
       } catch {
         mergeDiags.push("state-update.md missing or unparseable; skipped (degraded)");
       }

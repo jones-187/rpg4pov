@@ -324,18 +324,28 @@ export function defaultSpawn(
 
     let stdout = "";
     let stderr = "";
+    // stdout 只保留尾部环形缓冲：诊断仅取 ~2KB slice，而 pi --mode json 事件流
+    // 每行携带累积 partial，全程可达数百 MB——无上限累积会撑爆 V8 字符串
+    // 上限（RangeError: Invalid string length，实测炸掉整个 data 回调）
+    const STDOUT_TAIL_LIMIT = 64 * 1024;
     // onStdoutLine 旁路：按行切分转发（保留不完整尾行等下一个 chunk；
     // 流结束时残余不_flush——jsonl 事件流必然换行结尾，半行无消费价值）
     let lineBuf = "";
     child.stdout?.on("data", (chunk) => {
       const text = chunk.toString();
-      stdout += text;
+      stdout = (stdout + text).slice(-STDOUT_TAIL_LIMIT);
       if (!opts.onStdoutLine) return;
       lineBuf += text;
       const lines = lineBuf.split("\n");
       lineBuf = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.trim() !== "") opts.onStdoutLine(line);
+        if (line.trim() === "") continue;
+        // 预览是旁路：它的 bug 不得炸掉 spawn/诊断主链路
+        try {
+          opts.onStdoutLine(line);
+        } catch {
+          // 静默——权威路径不受影响
+        }
       }
     });
     child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
