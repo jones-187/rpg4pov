@@ -22,6 +22,7 @@ import {
   readWorkspaceUnsafeMarker,
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
+import { clearTurnProgress } from "./turn-progress";
 import { appendTurnHistory, readTurnHistoryRaw, type TurnHistoryEntry } from "./turn-history";
 import {
   readTurnInteraction,
@@ -102,6 +103,9 @@ export class TurnOrchestrator {
       return await this.runWithSnapshot(storyId, playerInput, opts);
     } finally {
       release();
+      // 回合终局（成功/失败/回滚）统一清掉叙事先行预览——预览通道只活在
+      // 回合生命周期内，权威结果走 POST 响应
+      clearTurnProgress(storyId);
     }
   }
 

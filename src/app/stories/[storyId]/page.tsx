@@ -108,6 +108,8 @@ export default function StoryPage() {
   const [error, setError] = useState<string | null>(null);
   // 感知延迟优化：提交起计时 + 每秒重渲染驱动阶段文案
   const [pendingSince, setPendingSince] = useState<number | null>(null);
+  // 叙事先行预览：回合 pending 期间轮询 turn-preview，叙事/选项组合完成即先显示
+  const [preview, setPreview] = useState<{ narrative?: string; interaction?: TurnInteraction } | null>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -165,15 +167,51 @@ export default function StoryPage() {
 
   // 初始化与回合共用一条提交路径：POST → 校验 committed turn → 追加 history。
   // 差异只有 URL/payload、失败回填的 state 与成功后的额外动作。
+  // pollTurnPreview（回合路径）：pending 期间轮询 turn-preview，叙事组合完成
+  // 即先显示（早于 POST 返回）；POST 落定后预览被 committed entry 取代，
+  // 失败则撤回预览回到错误态。
   async function submitTurnLike(
     url: string,
     payload: Record<string, string>,
     refill: (text: string) => void,
     onSuccess: () => void,
+    pollTurnPreview = false,
   ) {
     setLoading(true);
     setPendingSince(Date.now());
     setError(null);
+    let pollAlive = true;
+    const pollPreview = async () => {
+      try {
+        const res = await fetch(`/api/stories/${storyId}/turn-preview`);
+        if (!pollAlive || !res.ok) return;
+        const data = (await res.json()) as {
+          active?: boolean;
+          phase?: string;
+          narrative?: string;
+          interaction?: unknown;
+        };
+        if (!pollAlive || !data.active) return;
+        if (data.phase === "generating") {
+          // 重试重开：服务端已撤回预览，前端同步撤回
+          setPreview(null);
+          return;
+        }
+        setPreview({
+          narrative: typeof data.narrative === "string" ? data.narrative : undefined,
+          // 交互建议未到时不给默认值（默认值会被当成"已就绪"）
+          ...(data.interaction !== undefined
+            ? { interaction: parseInteraction(data.interaction) }
+            : {}),
+        });
+      } catch {
+        // 轮询失败静默——权威结果仍由 POST 返回
+      }
+    };
+    if (pollTurnPreview) {
+      void pollPreview();
+    }
+    const pollTimer = pollTurnPreview ? setInterval(pollPreview, 1000) : undefined;
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -196,6 +234,11 @@ export default function StoryPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
+      pollAlive = false;
+      if (pollTimer) clearInterval(pollTimer);
+      // 预览生命周期与回合一致：落定即撤（成功由 committed entry 取代，
+      // 失败回到错误态——1/6 口述 flake 重试期间用户看到的预览会被收回）
+      setPreview(null);
       setLoading(false);
       setPendingSince(null);
     }
@@ -221,7 +264,7 @@ export default function StoryPage() {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
-    await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""));
+    await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""), true);
   }
 
   // Issue 10：系统级"继续"——让人物和事件自然发展，不是主角台词。
@@ -232,6 +275,7 @@ export default function StoryPage() {
       { storyId, command: "continue" },
       () => {},
       () => setInput(""),
+      true,
     );
   }
 
@@ -271,6 +315,15 @@ export default function StoryPage() {
             </div>
           ))
         )}
+        {preview?.narrative && (
+          <div className="turn-entry turn-entry-preview" aria-label="本回合叙事预览（未提交）">
+            <div className="turn-output-block">
+              <h3 className="turn-block-title">主角视窗</h3>
+              <div className="turn-output-content">{normalizeOutput(preview.narrative)}</div>
+              {!preview.interaction && <p className="muted">生成交互建议…</p>}
+            </div>
+          </div>
+        )}
       </section>
 
       {!initialized ? (
@@ -305,7 +358,7 @@ export default function StoryPage() {
           )}
         </form>
       )}
-      {loading && pendingSince !== null && (
+      {loading && pendingSince !== null && !preview?.narrative && (
         <p className="muted" aria-live="polite">
           {(() => {
             const elapsed = Math.floor((Date.now() - pendingSince) / 1000);

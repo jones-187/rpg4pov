@@ -6,6 +6,7 @@ import { PiRunner } from "@/lib/pi-runner";
 import type { SpawnFn, SpawnOpts } from "@/lib/claude-code-runner";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
+import { readTurnProgress, clearTurnProgress } from "@/lib/turn-progress";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 /**
@@ -160,6 +161,10 @@ describe("PiRunner", () => {
     expect(calls[0].args).toContain("-p");
     expect(calls[0].args).toContain("--no-session");
     expect(calls[0].args).toContain("qwen-fp8");
+    // json 事件流：叙事先行显示的数据源
+    const modeIdx = calls[0].args.indexOf("--mode");
+    expect(modeIdx).toBeGreaterThan(-1);
+    expect(calls[0].args[modeIdx + 1]).toBe("json");
     // 工具面收窄：只允许 write（读/bash 从模型视野移除）
     const toolsIdx = calls[0].args.indexOf("--tools");
     expect(toolsIdx).toBeGreaterThan(-1);
@@ -315,5 +320,157 @@ describe("PiRunner", () => {
     const lines = raw.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ rollId: "first", sample: 0.5 });
+  });
+});
+
+// --- 叙事先行预览（--mode json 事件流 → turn-progress） ---
+
+/** 构造 pi --mode json 的 toolcall_end 事件行（contentIndex 指向 blocks 下标） */
+function piToolcallEndLine(contentIndex: number, filePath: string, content: string): string {
+  return JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "toolcall_end",
+      contentIndex,
+      partial: {
+        content: [
+          { type: "thinking", thinking: "（隐藏思考）" },
+          { type: "toolCall", name: "write", arguments: { path: filePath, content } },
+        ],
+      },
+    },
+  });
+}
+
+/**
+ * mock spawn：写盘行为同 makeSpawn，额外在写盘前后经 onStdoutLine
+ * 回放事件流（模拟 pi 逐事件输出）。
+ */
+function makeEventSpawn(
+  script: (null | { files: Record<string, string>; events: string[] })[],
+): { spawn: SpawnFn; calls: CallRecord[] } {
+  let i = 0;
+  const calls: CallRecord[] = [];
+  const spawn: SpawnFn = async (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    const step = script[Math.min(i, script.length - 1)];
+    i++;
+    if (step) {
+      for (const line of step.events) opts.onStdoutLine?.(line);
+      for (const [file, content] of Object.entries(step.files)) {
+        const target = path.join(opts.cwd, file);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content);
+      }
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  return { spawn, calls };
+}
+
+describe("PiRunner 叙事先行预览", () => {
+  it("toolcall_end(output.md/interaction.json) 事件发布叙事与交互预览", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn } = makeEventSpawn([
+      {
+        files: {
+          "turn/output.md": OUTPUT_MD,
+          "turn/interaction.json": INTERACTION_JSON,
+          "turn/state-update.md": STATE_UPDATE_MD,
+        },
+        events: [
+          piToolcallEndLine(1, path.join(dir, "turn", "output.md"), OUTPUT_MD),
+          piToolcallEndLine(1, path.join(dir, "turn", "interaction.json"), INTERACTION_JSON),
+        ],
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    const progress = readTurnProgress(meta.storyId);
+    expect(progress).not.toBeNull();
+    expect(progress!.narrative).toContain("你推门进来");
+    expect(progress!.interaction?.mode).toBe("decision");
+    expect(["narrative-ready", "interaction-ready"]).toContain(progress!.phase);
+    clearTurnProgress(meta.storyId);
+  });
+
+  it("首行契约不合规的 output.md 不发布预览", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const bad = "（没有标题行的口述正文）\n";
+    const { spawn } = makeEventSpawn([
+      {
+        files: { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON },
+        events: [piToolcallEndLine(1, path.join(dir, "turn", "output.md"), bad)],
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    const progress = readTurnProgress(meta.storyId);
+    expect(progress?.narrative).toBeUndefined();
+    clearTurnProgress(meta.storyId);
+  });
+
+  it("预览泄密守卫：output.md 逐字包含随机账本行不发布", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const rollLine = JSON.stringify({
+      rollId: "leaky",
+      sample: 0.42,
+      candidates: [{ id: "yes", weight: 50 }],
+      selectedId: "yes",
+    });
+    await fs.mkdir(path.join(dir, "logs"), { recursive: true });
+    await fs.writeFile(path.join(dir, "logs", "random-rolls.jsonl"), rollLine + "\n");
+    const leaky = "# 主角视窗\n\n" + rollLine + "\n";
+    const { spawn } = makeEventSpawn([
+      {
+        files: { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON },
+        events: [piToolcallEndLine(1, path.join(dir, "turn", "output.md"), leaky)],
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(readTurnProgress(meta.storyId)?.narrative).toBeUndefined();
+    clearTurnProgress(meta.storyId);
+  });
+
+  it("重试重开时预览被重置：最终预览来自第二次 attempt", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const firstNarrative = "# 主角视窗\n\n第一次尝试的叙事。\n";
+    const { spawn, calls } = makeEventSpawn([
+      // attempt 1：发布预览但不写盘（口述失效模式）
+      {
+        files: {},
+        events: [piToolcallEndLine(1, path.join(dir, "turn", "output.md"), firstNarrative)],
+      },
+      // attempt 2：不同叙事 + 全产物落盘
+      {
+        files: {
+          "turn/output.md": OUTPUT_MD,
+          "turn/interaction.json": INTERACTION_JSON,
+        },
+        events: [piToolcallEndLine(1, path.join(dir, "turn", "output.md"), OUTPUT_MD)],
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    const progress = readTurnProgress(meta.storyId);
+    expect(progress!.narrative).toContain("你推门进来");
+    expect(progress!.narrative).not.toContain("第一次尝试的叙事");
+    clearTurnProgress(meta.storyId);
   });
 });

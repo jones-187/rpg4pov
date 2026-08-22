@@ -171,6 +171,12 @@ body {
   margin-bottom: 0;
 }
 
+/* 叙事先行预览（回合进行中先显示正文）：左侧细线标记"未提交"状态 */
+.turn-entry-preview {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  padding-left: 12px;
+}
+
 .turn-input-block,
 .turn-output-block {
   display: flex;

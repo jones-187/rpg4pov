@@ -23,6 +23,8 @@ export interface SpawnOpts {
   /** stdin 内容：runTurn 传完整 prompt，spawn 后立即 child.stdin.end() */
   stdinData: string;
   stdio: ["pipe", "pipe", "pipe"];
+  /** 可选：stdout 每收到完整一行时回调（pi --mode json 事件流消费；不影响 stdout 聚合） */
+  onStdoutLine?: (line: string) => void;
   /** 测试 hack：暴露 ChildProcess 以便 runTurn 在 abort 时 kill（真实 spawn 由 defaultSpawn 挂载） */
   _child?: { kill(sig: string): void };
 }
@@ -230,7 +232,20 @@ export function defaultSpawn(
 
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
+    // onStdoutLine 旁路：按行切分转发（保留不完整尾行等下一个 chunk；
+    // 流结束时残余不_flush——jsonl 事件流必然换行结尾，半行无消费价值）
+    let lineBuf = "";
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      if (!opts.onStdoutLine) return;
+      lineBuf += text;
+      const lines = lineBuf.split("\n");
+      lineBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim() !== "") opts.onStdoutLine(line);
+      }
+    });
     child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
 
     child.on("error", (err) => {

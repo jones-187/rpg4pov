@@ -7,7 +7,11 @@ import { PI_TURN_SYSTEM_PROMPT, buildTurnUserPrompt } from "./pi-prompt";
 import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
 import { generateRollPool, recordPoolRoll, type RollChoiceRng } from "./random-tool";
 import { sanitizeForLog } from "./diagnostics";
-import { TURN_OUTPUT_PLACEHOLDER } from "./workspace";
+import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
+import { validateTurnOutput } from "./turn-output";
+import { readTurnInteractionRawLine } from "./turn-interaction";
+import { sanitizeTurnInteraction } from "./interaction-schema";
+import { publishTurnProgress } from "./turn-progress";
 
 /**
  * pi Coding Agent Runner（性能优化分支，task=turn 专用）。
@@ -225,6 +229,10 @@ export class PiRunner implements AgentRunner {
     const args = [
       "-p",
       "--no-session",
+      // json 事件流：toolcall_end 携带 write 参数原文，"叙事组合完成"时点
+      // （实测全程 84% 处）先于进程退出暴露给前端（叙事先行显示）
+      "--mode",
+      "json",
       "--model",
       resolvePiModel(),
       // 工具面收窄到 write：契约本就禁止读/bash，列表里不存在比措辞约束更硬
@@ -240,6 +248,9 @@ export class PiRunner implements AgentRunner {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       req.signal.throwIfAborted();
+      // 重试重开时相位回退到 generating——turn-progress 清空已发布预览，
+      // 前端撤回叙事显示回到等待态
+      publishTurnProgress(req.storyId, { phase: "generating" });
 
       const spawnOpts: SpawnOpts = {
         cwd: req.workspaceDir,
@@ -247,6 +258,7 @@ export class PiRunner implements AgentRunner {
         signal: req.signal,
         stdinData: "",
         stdio: ["pipe", "pipe", "pipe"],
+        onStdoutLine: makePiEventHandler(req),
       };
       let clearKillTimer: (() => void) | undefined;
       const onAbort = () => {
@@ -367,4 +379,84 @@ async function recordRollDeclarations(
     }
   }
   return notes;
+}
+
+/** pi json 事件流里 write 工具调用的最小形状（只取消费所需字段） */
+interface PiToolCallBlock {
+  type: string;
+  name?: string;
+  arguments?: { path?: unknown; content?: unknown };
+}
+
+/**
+ * pi --mode json 事件流 → 叙事先行预览。
+ * 只消费 toolcall_end（write 参数组合完成，早于磁盘写与服务端收尾）：
+ * output.md 就绪即发布叙事（先跑与权威路径相同的泄密守卫），
+ * interaction.json 就绪即发布净化后的交互建议。预览只是提前显示，
+ * 权威仍是磁盘产物 + orchestrator 校验链。
+ */
+function makePiEventHandler(req: TurnRequest): (line: string) => void {
+  return (line) => {
+    let ev: {
+      type?: string;
+      assistantMessageEvent?: {
+        type?: string;
+        contentIndex?: number;
+        partial?: { content?: PiToolCallBlock[] };
+      };
+    };
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const a = ev.assistantMessageEvent;
+    if (ev.type !== "message_update" || a?.type !== "toolcall_end") return;
+    const blocks = a.partial?.content ?? [];
+    // contentIndex = content 数组下标（thinking=0、toolCall=1..，实测稳定）；
+    // 取不到时退化为最后一个块
+    const block =
+      (a.contentIndex !== undefined ? blocks[a.contentIndex] : undefined) ??
+      blocks[blocks.length - 1];
+    if (!block || block.type !== "toolCall" || block.name !== "write") return;
+    const filePath = typeof block.arguments?.path === "string" ? block.arguments.path : "";
+    const content = typeof block.arguments?.content === "string" ? block.arguments.content : "";
+    if (filePath.endsWith("turn/output.md")) {
+      void publishNarrativePreview(req, content);
+    } else if (filePath.endsWith("turn/interaction.json")) {
+      publishInteractionPreview(req, content);
+    }
+  };
+}
+
+/** 叙事预览发布：首行契约 + 占位排除 + 与权威路径同源的泄密守卫，全过才发布 */
+async function publishNarrativePreview(req: TurnRequest, content: string): Promise<void> {
+  const trimmed = content.trim();
+  const firstLine = trimmed.split("\n")[0]?.trim();
+  if (firstLine !== "# 主角视窗" || trimmed === TURN_OUTPUT_PLACEHOLDER.trim()) return;
+  try {
+    const rollLines = await readRandomRollLines(req.storyId);
+    const interactionRawLine = await readTurnInteractionRawLine(req.storyId);
+    const problem = validateTurnOutput(
+      trimmed,
+      rollLines,
+      interactionRawLine ? [interactionRawLine] : [],
+    );
+    if (problem) return;
+    publishTurnProgress(req.storyId, { phase: "narrative-ready", narrative: trimmed });
+  } catch {
+    // 预览是旁路，任何失败静默——权威路径不受影响
+  }
+}
+
+/** 交互建议预览发布：可解析且净化通过才发布 */
+function publishInteractionPreview(req: TurnRequest, content: string): void {
+  try {
+    const sanitized = sanitizeTurnInteraction(JSON.parse(content));
+    if (sanitized) {
+      publishTurnProgress(req.storyId, { phase: "interaction-ready", interaction: sanitized });
+    }
+  } catch {
+    // 不可解析交给权威路径
+  }
 }

@@ -7,6 +7,7 @@ import { FakeAgentRunner } from "@/lib/fake-agent-runner";
 import { createStory, getStory, readTurnDone, readTurnOutput, resolveSnapshotsRoot, resolveWorkspaceDir } from "@/lib/workspace";
 import { readWorkspaceUnsafeMarker } from "@/lib/turn-snapshot";
 import { readTurnHistory, appendTurnHistory, type TurnHistoryEntry } from "@/lib/turn-history";
+import { publishTurnProgress, readTurnProgress } from "@/lib/turn-progress";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -95,6 +96,17 @@ describe("TurnOrchestrator", () => {
     expect(outcome.playerResponse).toContain("推开木门");
     // 返回内容必须等于 turn/output.md 落盘内容
     expect(outcome.playerResponse).toBe(await readTurnOutput(meta.storyId));
+  });
+
+  it("回合终局清空叙事先行预览（成功与失败路径都清）", async () => {
+    const meta = await createStory();
+    publishTurnProgress(meta.storyId, { phase: "narrative-ready", narrative: "预览" });
+    await new TurnOrchestrator(new FakeAgentRunner()).executeTurn(meta.storyId, "推门");
+    expect(readTurnProgress(meta.storyId)).toBeNull();
+
+    publishTurnProgress(meta.storyId, { phase: "narrative-ready", narrative: "预览2" });
+    await new TurnOrchestrator(new NoopRunner()).executeTurn(meta.storyId, "再推");
+    expect(readTurnProgress(meta.storyId)).toBeNull();
   });
 
   it("success: done.json exists with status=success after turn", async () => {
