@@ -2,9 +2,10 @@ import { spawn as realSpawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, RunnerTask, TurnRequest, TurnResult } from "./agent-runner";
-import { buildPrompt, buildInitPrompt } from "./claude-prompt";
+import { buildPrompt, buildInitPrompt, INIT_SKELETON_FILES } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
+import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
 
 /** 默认 prompt 选择：task=init 用初始化模板（预注入骨架文件），否则回合模板 */
 async function defaultPromptTemplate(
@@ -23,7 +24,7 @@ async function defaultPromptTemplate(
  */
 async function readInitSkeletonContext(workspaceDir: string): Promise<string> {
   const parts: string[] = [];
-  for (const file of ["story.md", "world.md", "player.md", "rules.md"]) {
+  for (const file of INIT_SKELETON_FILES) {
     let content: string;
     try {
       content = (await fs.readFile(path.join(workspaceDir, file), "utf8")).trimEnd();
@@ -153,9 +154,15 @@ export class ClaudeCodeRunner implements AgentRunner {
     req.signal.addEventListener("abort", onAbort);
 
     // done.json 早退看门狗基线（spawn 前 fs 时戳快照；正常流程 orchestrator
-    // 已 unlink done.json，基线为 null）
+    // 已 unlink done.json，基线为 null）。仅 init 任务启用——turn 路径生产
+    // 走 Pi Runner，本 runner 的 turn 行为保持原样
     const doneBaseline = await statDoneMtime(req.workspaceDir);
-    const watcher = startDoneWatcher(spawnOpts, req.workspaceDir, doneBaseline);
+    const watcher = startDoneWatcher(
+      spawnOpts,
+      req.workspaceDir,
+      doneBaseline,
+      earlyExitEnabled() && task === "init",
+    );
 
     try {
       req.signal.throwIfAborted();
@@ -248,12 +255,6 @@ function earlyExitEnabled(): boolean {
   return process.env.CLAUDE_EARLY_EXIT !== "0";
 }
 
-interface DoneWatchHandle {
-  stop(): void;
-  /** 看门狗已判定 done.json 完成并发出 SIGTERM */
-  fired: boolean;
-}
-
 async function statDoneMtime(workspaceDir: string): Promise<number | null> {
   try {
     return (await fs.stat(path.join(workspaceDir, "turn", "done.json"))).mtimeMs;
@@ -263,53 +264,33 @@ async function statDoneMtime(workspaceDir: string): Promise<number | null> {
 }
 
 /**
- * done.json 早退看门狗（init/turn 通用）。
+ * done.json 早退看门狗（init 专用，P2 三刀之三）。
  * 时间解剖实测：claude 在 done.json 落盘后还会跑数十秒的自查/返工/告别
  * 陈词，用户全程盯着进度条。契约已改为"done.json 永远是最后一步"，故
  * done.json 新鲜落盘且 status=success 即 SIGTERM 砍掉 post-done 尾巴。
  * 新鲜度 = mtime 严格新于 spawn 前基线（fs 对 fs，规避时钟偏差与上回合
- * 残留误杀——同 pi-runner 看门狗）。杀早了的内容缺陷由 orchestrator
- * 的 output 校验 + validateInitWorkspace 兜底（整轮回滚，fail-closed）。
+ * 残留误杀）。杀早了的内容缺陷由 orchestrator 的 output 校验 +
+ * validateInitWorkspace 兜底（整轮回滚，fail-closed）。
+ * 轮询骨架见 poll-watcher（与 pi 三产物看门狗共用）。
  */
 function startDoneWatcher(
   spawnOpts: SpawnOpts,
   workspaceDir: string,
   baseline: number | null,
-): DoneWatchHandle {
-  if (!earlyExitEnabled()) return { stop: () => {}, fired: false };
-  let timer: NodeJS.Timeout | undefined;
-  let stopped = false;
-  const handle: DoneWatchHandle = {
-    fired: false,
-    stop() {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    },
-  };
-  const tick = async () => {
-    if (stopped) return;
-    let complete = false;
-    try {
+  enabled: boolean,
+): PollWatchHandle {
+  return startPollWatcher(
+    DONE_WATCH_INTERVAL_MS,
+    async () => {
       const donePath = path.join(workspaceDir, "turn", "done.json");
       const mtime = (await fs.stat(donePath)).mtimeMs;
-      if (baseline === null || mtime > baseline) {
-        const parsed = JSON.parse(await fs.readFile(donePath, "utf8")) as { status?: unknown };
-        complete = parsed.status === "success";
-      }
-    } catch {
-      complete = false;
-    }
-    if (stopped) return;
-    if (complete) {
-      handle.fired = true;
-      handle.stop();
-      spawnOpts._child?.kill("SIGTERM");
-      return;
-    }
-    timer = setTimeout(tick, DONE_WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
-  };
-  timer = setTimeout(tick, DONE_WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
-  return handle;
+      if (baseline !== null && mtime <= baseline) return false;
+      const parsed = JSON.parse(await fs.readFile(donePath, "utf8")) as { status?: unknown };
+      return parsed.status === "success";
+    },
+    () => spawnOpts._child?.kill("SIGTERM"),
+    enabled,
+  );
 }
 
 /** 构造 claude 子进程 env：process.env 白名单 + runner 固定配置 */

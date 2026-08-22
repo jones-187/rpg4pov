@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  beginTurnAttempt,
   publishTurnProgress,
   readTurnProgress,
   clearTurnProgress,
@@ -49,5 +50,30 @@ describe("TurnProgress 注册表（叙事先行显示通道）", () => {
 
   it("无进行中回合返回 null", () => {
     expect(readTurnProgress("prog-none")).toBeNull();
+  });
+
+  it("迟到发布防御：旧 attempt 令牌的发布被丢弃（撤回不可推翻、终局后无僵尸预览）", () => {
+    const t1 = beginTurnAttempt("prog-4");
+    publishTurnProgress("prog-4", { phase: "narrative-ready", narrative: "N1" }, t1);
+    expect(readTurnProgress("prog-4")?.narrative).toBe("N1");
+
+    // attempt 2 重开：令牌推进 + 预览撤回
+    const t2 = beginTurnAttempt("prog-4");
+    expect(readTurnProgress("prog-4")?.phase).toBe("generating");
+    expect(readTurnProgress("prog-4")?.narrative).toBeUndefined();
+
+    // attempt 1 的迟到发布（泄密守卫读盘期间跨越了重试）：丢弃
+    publishTurnProgress("prog-4", { phase: "narrative-ready", narrative: "STALE" }, t1);
+    expect(readTurnProgress("prog-4")?.narrative).toBeUndefined();
+
+    // attempt 2 正常发布
+    publishTurnProgress("prog-4", { phase: "narrative-ready", narrative: "N2" }, t2);
+    expect(readTurnProgress("prog-4")?.narrative).toBe("N2");
+
+    // 终局清空后，迟到的旧发布不落成僵尸预览（下一回合首次轮询读到 null）
+    clearTurnProgress("prog-4");
+    publishTurnProgress("prog-4", { phase: "narrative-ready", narrative: "GHOST" }, t2);
+    expect(readTurnProgress("prog-4")).toBeNull();
+    clearTurnProgress("prog-4");
   });
 });

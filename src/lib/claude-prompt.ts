@@ -130,6 +130,11 @@ DO NOT:
 - 随机判定结果必须服从，不得在 output 中直接展示 random log 内容
 - 仅可写 turn/output.md、turn/interaction.json、turn/done.json、world.md、player.md、actors/**、adjustments.md、tendencies.md；不得创建其他文件`;
 
+/**
+ * init 骨架预注入的文件清单（runner 读取占位文件与模板说明共用此单源）。
+ */
+export const INIT_SKELETON_FILES = ["story.md", "world.md", "player.md", "rules.md"] as const;
+
 export function buildPrompt(playerInput: string): string {
   return STORY_TURN_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => playerInput);
 }

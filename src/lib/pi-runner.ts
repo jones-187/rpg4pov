@@ -11,7 +11,8 @@ import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
 import { validateTurnOutput } from "./turn-output";
 import { readTurnInteractionRawLine } from "./turn-interaction";
 import { sanitizeTurnInteraction } from "./interaction-schema";
-import { publishTurnProgress } from "./turn-progress";
+import { beginTurnAttempt, publishTurnProgress } from "./turn-progress";
+import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
 
 /**
  * pi Coding Agent Runner（性能优化分支，task=turn 专用）。
@@ -91,12 +92,6 @@ function earlyExitEnabled(): boolean {
   return process.env.PI_EARLY_EXIT !== "0";
 }
 
-interface WatchHandle {
-  stop(): void;
-  /** 看门狗已判定产物齐全并发出 SIGTERM */
-  fired: boolean;
-}
-
 /** 三产物的 mtime 基线（attempt 开始前快照；null = 当时不存在） */
 interface ArtifactMtimes {
   output: number | null;
@@ -167,41 +162,19 @@ async function turnArtifactsComplete(workspaceDir: string, baselines: ArtifactMt
  * （实测那趟只为输出"回合完成"23 token，却要 prefill 4.3k fresh + 整套
  * 网关往返，值 3-8s）。SIGTERM 后 pi 退出码非 0——由 fired 标记跳过
  * 退出码检查直接进产物校验；撕裂写（校验不过）按既有循环自愈重试。
+ * 轮询骨架见 poll-watcher（与 claude done.json 看门狗共用）。
  */
 function startEarlyExitWatcher(
   spawnOpts: SpawnOpts,
   workspaceDir: string,
   baselines: ArtifactMtimes,
-): WatchHandle {
-  if (!earlyExitEnabled()) return { stop: () => {}, fired: false };
-  let timer: NodeJS.Timeout | undefined;
-  let stopped = false;
-  const handle: WatchHandle = {
-    fired: false,
-    stop() {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    },
-  };
-  const tick = async () => {
-    if (stopped) return;
-    let complete = false;
-    try {
-      complete = await turnArtifactsComplete(workspaceDir, baselines);
-    } catch {
-      complete = false;
-    }
-    if (stopped) return;
-    if (complete) {
-      handle.fired = true;
-      handle.stop();
-      spawnOpts._child?.kill("SIGTERM");
-      return;
-    }
-    timer = setTimeout(tick, WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
-  };
-  timer = setTimeout(tick, WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
-  return handle;
+): PollWatchHandle {
+  return startPollWatcher(
+    WATCH_INTERVAL_MS,
+    () => turnArtifactsComplete(workspaceDir, baselines),
+    () => spawnOpts._child?.kill("SIGTERM"),
+    earlyExitEnabled(),
+  );
 }
 
 export class PiRunner implements AgentRunner {
@@ -249,8 +222,9 @@ export class PiRunner implements AgentRunner {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       req.signal.throwIfAborted();
       // 重试重开时相位回退到 generating——turn-progress 清空已发布预览，
-      // 前端撤回叙事显示回到等待态
-      publishTurnProgress(req.storyId, { phase: "generating" });
+      // 前端撤回叙事显示回到等待态；attempt 令牌发放后，旧 attempt 迟到
+      // 的异步发布（泄密守卫读盘期间跨越了重试/终局）凭旧令牌被丢弃
+      const attemptToken = beginTurnAttempt(req.storyId);
 
       const spawnOpts: SpawnOpts = {
         cwd: req.workspaceDir,
@@ -258,7 +232,7 @@ export class PiRunner implements AgentRunner {
         signal: req.signal,
         stdinData: "",
         stdio: ["pipe", "pipe", "pipe"],
-        onStdoutLine: makePiEventHandler(req),
+        onStdoutLine: makePiEventHandler(req, attemptToken),
       };
       let clearKillTimer: (() => void) | undefined;
       const onAbort = () => {
@@ -393,9 +367,10 @@ interface PiToolCallBlock {
  * 只消费 toolcall_end（write 参数组合完成，早于磁盘写与服务端收尾）：
  * output.md 就绪即发布叙事（先跑与权威路径相同的泄密守卫），
  * interaction.json 就绪即发布净化后的交互建议。预览只是提前显示，
- * 权威仍是磁盘产物 + orchestrator 校验链。
+ * 权威仍是磁盘产物 + orchestrator 校验链。token 为 attempt 令牌——
+ * 迟到发布（跨越重试/终局）由 turn-progress 丢弃。
  */
-function makePiEventHandler(req: TurnRequest): (line: string) => void {
+function makePiEventHandler(req: TurnRequest, token: number): (line: string) => void {
   return (line) => {
     let ev: {
       type?: string;
@@ -422,15 +397,19 @@ function makePiEventHandler(req: TurnRequest): (line: string) => void {
     const filePath = typeof block.arguments?.path === "string" ? block.arguments.path : "";
     const content = typeof block.arguments?.content === "string" ? block.arguments.content : "";
     if (filePath.endsWith("turn/output.md")) {
-      void publishNarrativePreview(req, content);
+      void publishNarrativePreview(req, content, token);
     } else if (filePath.endsWith("turn/interaction.json")) {
-      publishInteractionPreview(req, content);
+      publishInteractionPreview(req, content, token);
     }
   };
 }
 
 /** 叙事预览发布：首行契约 + 占位排除 + 与权威路径同源的泄密守卫，全过才发布 */
-async function publishNarrativePreview(req: TurnRequest, content: string): Promise<void> {
+async function publishNarrativePreview(
+  req: TurnRequest,
+  content: string,
+  token: number,
+): Promise<void> {
   const trimmed = content.trim();
   const firstLine = trimmed.split("\n")[0]?.trim();
   if (firstLine !== "# 主角视窗" || trimmed === TURN_OUTPUT_PLACEHOLDER.trim()) return;
@@ -443,18 +422,18 @@ async function publishNarrativePreview(req: TurnRequest, content: string): Promi
       interactionRawLine ? [interactionRawLine] : [],
     );
     if (problem) return;
-    publishTurnProgress(req.storyId, { phase: "narrative-ready", narrative: trimmed });
+    publishTurnProgress(req.storyId, { phase: "narrative-ready", narrative: trimmed }, token);
   } catch {
     // 预览是旁路，任何失败静默——权威路径不受影响
   }
 }
 
 /** 交互建议预览发布：可解析且净化通过才发布 */
-function publishInteractionPreview(req: TurnRequest, content: string): void {
+function publishInteractionPreview(req: TurnRequest, content: string, token: number): void {
   try {
     const sanitized = sanitizeTurnInteraction(JSON.parse(content));
     if (sanitized) {
-      publishTurnProgress(req.storyId, { phase: "interaction-ready", interaction: sanitized });
+      publishTurnProgress(req.storyId, { phase: "interaction-ready", interaction: sanitized }, token);
     }
   } catch {
     // 不可解析交给权威路径

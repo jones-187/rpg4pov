@@ -8,6 +8,7 @@ import {
   DEFAULT_TURN_INTERACTION,
   type TurnInteraction,
 } from "@/lib/interaction-schema";
+import type { TurnProgress } from "@/lib/turn-progress";
 
 interface StoryMeta {
   storyId: string;
@@ -27,7 +28,9 @@ interface TurnHistoryEntry {
  * 打字机渐显（VN 质感）：叙事预览到达后逐字浮现，点击任意位置立即显示全部。
  * 只作用于预览；committed entry 全文直出（预览期已被读过，不重复动画）。
  */
-function Typewriter({ text, charsPerTick = 3 }: { text: string; charsPerTick?: number }) {
+function Typewriter({ text }: { text: string }) {
+  // 3 字/50ms ≈ 60 字/秒：350 字叙事约 6 秒铺完，跟得上朗读节奏
+  const charsPerTick = 3;
   const [shown, setShown] = useState(0);
   const done = shown >= text.length;
   useEffect(() => {
@@ -159,7 +162,11 @@ export default function StoryPage() {
     if (loading || queuedInput === null || !initialized) return;
     const text = queuedInput;
     setQueuedInput(null);
-    void submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""), true);
+    void submitTurnLike(
+      "/api/story-turn",
+      { storyId, input: text },
+      { refill: refillIfEmpty, onSuccess: () => {}, pollPreview: true },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, queuedInput, initialized, storyId]);
 
@@ -211,16 +218,20 @@ export default function StoryPage() {
   }
 
   // 初始化与回合共用一条提交路径：POST → 校验 committed turn → 追加 history。
-  // 差异只有 URL/payload、失败回填的 state 与成功后的额外动作。
-  // pollTurnPreview（回合路径）：pending 期间轮询 turn-preview，叙事组合完成
+  // 差异只有 URL/payload 与 opts（回填/成功动作/是否轮询预览）。
+  // pollPreview（回合路径）：pending 期间轮询 turn-preview，叙事组合完成
   // 即先显示（早于 POST 返回）；POST 落定后预览被 committed entry 取代，
   // 失败则撤回预览回到错误态。
+  // 注意：onSuccess 里不做"清空输入框"——清空发生在各调用方提交的瞬间
+  // （同步、用户意图明确）；落定时刻用户可能已在打下一步草稿。
   async function submitTurnLike(
     url: string,
     payload: Record<string, string>,
-    refill: (text: string) => void,
-    onSuccess: () => void,
-    pollTurnPreview = false,
+    opts: {
+      refill: (text: string) => void;
+      onSuccess: () => void;
+      pollPreview?: boolean;
+    },
   ) {
     setLoading(true);
     setPendingSince(Date.now());
@@ -236,7 +247,7 @@ export default function StoryPage() {
         if (!pollAlive || !res.ok) return;
         const data = (await res.json()) as {
           active?: boolean;
-          phase?: string;
+          phase?: TurnProgress["phase"];
           narrative?: string;
           interaction?: unknown;
         };
@@ -257,10 +268,10 @@ export default function StoryPage() {
         // 轮询失败静默——权威结果仍由 POST 返回
       }
     };
-    if (pollTurnPreview) {
+    if (opts.pollPreview) {
       void pollPreview();
     }
-    const pollTimer = pollTurnPreview ? setInterval(pollPreview, 1000) : undefined;
+    const pollTimer = opts.pollPreview ? setInterval(pollPreview, 1000) : undefined;
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -269,7 +280,7 @@ export default function StoryPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        applyErrorResponse(res, data, refill);
+        applyErrorResponse(res, data, opts.refill);
         return;
       }
       const turn = parseTurnResponse(data);
@@ -279,7 +290,7 @@ export default function StoryPage() {
       setHistory((prev) => [...prev, turn]);
       // Issue 10：更新交互状态（缺失/不合法时降级为连续演出态）
       setInteraction(parseInteraction((data as { interaction?: unknown }).interaction));
-      onSuccess();
+      opts.onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
@@ -294,6 +305,10 @@ export default function StoryPage() {
     }
   }
 
+  // 失败回填：仅当输入框为空时回填 retryInput——pending 期间用户可能已
+  // 打好下一步草稿，无条件覆盖会吞掉它（错误信息仍照常展示）
+  const refillIfEmpty = (text: string) => setInput((cur) => (cur.trim() === "" ? text : cur));
+
   // Issue 7：初始化——提交自然语言设定，开场视窗作为第一条 history entry 返回
   async function handleInitSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -302,10 +317,12 @@ export default function StoryPage() {
     await submitTurnLike(
       `/api/stories/${storyId}/initialize`,
       { setting: text },
-      setSetting,
-      () => {
-        setInitialized(true);
-        setSetting("");
+      {
+        refill: (t) => setSetting((cur) => (cur.trim() === "" ? t : cur)),
+        onSuccess: () => {
+          setInitialized(true);
+          setSetting("");
+        },
       },
     );
   }
@@ -320,19 +337,24 @@ export default function StoryPage() {
       setInput("");
       return;
     }
-    await submitTurnLike("/api/story-turn", { storyId, input: text }, setInput, () => setInput(""), true);
+    // 清空发生在提交瞬间（同步、用户意图明确）；onSuccess 不再清空——
+    // 落定时用户可能已在打下一步草稿
+    setInput("");
+    await submitTurnLike(
+      "/api/story-turn",
+      { storyId, input: text },
+      { refill: refillIfEmpty, onSuccess: () => {}, pollPreview: true },
+    );
   }
 
   // Issue 10：系统级"继续"——让人物和事件自然发展，不是主角台词。
   async function handleContinue() {
     if (loading) return;
-    await submitTurnLike(
-      "/api/story-turn",
-      { storyId, command: "continue" },
-      () => {},
-      () => setInput(""),
-      true,
-    );
+    await submitTurnLike("/api/story-turn", { storyId, command: "continue" }, {
+      refill: () => {},
+      onSuccess: () => {},
+      pollPreview: true,
+    });
   }
 
   if (notFound) {
@@ -388,6 +410,21 @@ export default function StoryPage() {
                 {!preview.interaction && <p className="muted">生成交互建议…</p>}
               </div>
             )}
+            {preview?.interaction?.mode === "decision" &&
+              preview.interaction.suggestions.length > 0 && (
+                <div className="suggestions" aria-label="交互建议预览（未提交）">
+                  {preview.interaction.suggestions.map((s, i) => (
+                    <button
+                      key={`preview-${i}-${s}`}
+                      type="button"
+                      className="suggestion-chip"
+                      onClick={() => setInput(s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
           </div>
         ) : null}
       </section>

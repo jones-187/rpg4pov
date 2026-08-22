@@ -21,6 +21,7 @@ _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状�
 ### Player-visible Output（主角可见输出）
 回合完成后，用户能通过 Web 界面看到的内容。**只来自 `turn/output.md`**，不包含 agent stdout、内部日志、God State、NPC 私有记忆或随机判定日志。
 格式契约（Issue 12 起 orchestrator 强制校验，`src/lib/turn-output.ts`）：首行必须是 `# 主角视窗` 标题；长度失控、正文为 JSON 转储、逐字包含 random log 行或 interaction.json 原文都判"明显不合规"，回合失败回滚。语义级泄漏审查是 P1，不在此层。
+例外：**回合进行中的叙事先行预览**（性能优化分支）——pi 事件流的 write 工具参数在落盘前即含产物原文，PiRunner 在 `toolcall_end(output.md)` 时点先跑同源泄密守卫后经 Turn Progress Registry 提前推给前端。预览不是权威（POST 响应里的 committed turn 才是），回合失败/重试时前端撤回；守卫与提交校验完全同源，质量门不因提前显示放宽。
 
 ## 叙事与主角相关
 
@@ -168,6 +169,7 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 rout
 
 ### Done Marker（运行成功标记）
 `turn/done.json` 文件，回合成功完成后写入——Pi Runner 路径由 Web 侧在解析合并 State Update Bundle 之后写入；Claude Code Runner（init）路径由 agent 按 prompt 指令写入。Turn Orchestrator 以此文件的**磁盘存在性和状态**为权威依据判断回合是否成功，不依赖 runner 的返回值。回合开始前由 Orchestrator 清理。
+init 契约（性能优化分支）要求 done.json **永远是最后一步**，写完立即结束（不复查不总结）；Claude Code Runner 的 done.json 看门狗（`CLAUDE_EARLY_EXIT=0` 可关）在其新鲜落盘且 status=success 时 SIGTERM 砍掉 post-done 尾巴——实测 claude 曾在 done.json 落盘后继续自查/返工数十秒。杀早了的内容缺陷由 orchestrator 既有校验链兜底（整轮回滚，fail-closed）。
 
 ### Turn Snapshot（回合快照）
 回合开始前由 Orchestrator 创建的整个 Story Workspace 目录副本，用于失败回滚。**不是 Story Workspace 的一部分，不是故事状态**——是瞬态恢复机制，存活期不超过一次回合。存放在 Story Workspace 目录之外（`{WORKSPACE_ROOT}/.snapshots/{storyId}/`），每故事单份、回合前覆盖。
