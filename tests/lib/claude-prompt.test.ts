@@ -513,3 +513,31 @@ describe("claude-prompt: post-acceptance polish (Issue 14)", () => {
     expect(prompt).toContain("自然接话不受影响");
   });
 });
+
+describe("claude-prompt: init 三刀（P2 时间解剖优化）", () => {
+  it("init prompt 预注入骨架段占位并注入调用方提供的上下文", () => {
+    const prompt = buildInitPrompt("测试设定");
+    expect(prompt).toContain("已预注入的骨架文件");
+    expect(prompt).toContain("无需读取");
+    expect(prompt).not.toContain("{SKELETON_CONTEXT}");
+
+    const withSkeleton = buildInitPrompt("测试设定", "=== story.md ===\n占位原文X");
+    expect(withSkeleton).toContain("=== story.md ===");
+    expect(withSkeleton).toContain("占位原文X");
+  });
+
+  it("init prompt 要求批量落盘（砍逐文件往返开销）", () => {
+    const prompt = buildInitPrompt("test");
+    expect(prompt).toContain("批量落盘");
+    expect(prompt).toContain("并发多个 Write");
+    expect(prompt).toContain("不要一个文件一轮对话地顺序写");
+  });
+
+  it("init prompt 要求 done.json 最后一步 + 写完立即结束（配合 done 看门狗）", () => {
+    const prompt = buildInitPrompt("test");
+    expect(prompt).toContain("最后一步");
+    expect(prompt).toContain("写完立即结束");
+    expect(prompt).toContain("不要重新读取文件复查");
+    expect(prompt).toContain("任何文件未完成前绝不写 done.json");
+  });
+});

@@ -1,12 +1,38 @@
 import { spawn as realSpawn, type ChildProcess } from "node:child_process";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { AgentRunner, RunnerTask, TurnRequest, TurnResult } from "./agent-runner";
 import { buildPrompt, buildInitPrompt } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
 
-/** 默认 prompt 选择：task=init 用初始化模板，否则用回合模板（Issue 7） */
-function defaultPromptTemplate(input: string, task: RunnerTask): string {
-  return task === "init" ? buildInitPrompt(input) : buildPrompt(input);
+/** 默认 prompt 选择：task=init 用初始化模板（预注入骨架文件），否则回合模板 */
+async function defaultPromptTemplate(
+  input: string,
+  task: RunnerTask,
+  workspaceDir: string,
+): Promise<string> {
+  return task === "init"
+    ? buildInitPrompt(input, await readInitSkeletonContext(workspaceDir))
+    : buildPrompt(input);
+}
+
+/**
+ * init 骨架文件预注入段：读取占位文件原文拼进 prompt。
+ * 缺失文件标"（不存在）"——正常 init 流程骨架必然存在，防御性兜底。
+ */
+async function readInitSkeletonContext(workspaceDir: string): Promise<string> {
+  const parts: string[] = [];
+  for (const file of ["story.md", "world.md", "player.md", "rules.md"]) {
+    let content: string;
+    try {
+      content = (await fs.readFile(path.join(workspaceDir, file), "utf8")).trimEnd();
+    } catch {
+      content = "（不存在）";
+    }
+    parts.push(`=== ${file} ===\n${content}`);
+  }
+  return parts.join("\n\n");
 }
 
 /** spawn 函数签名（用于依赖注入测试） */
@@ -88,13 +114,17 @@ const SIGKILL_GRACE_MS = 5_000;
 export class ClaudeCodeRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly claudePath: string;
-  private readonly promptTemplate: (input: string, task: RunnerTask) => string;
+  private readonly promptTemplate: (
+    input: string,
+    task: RunnerTask,
+    workspaceDir: string,
+  ) => string | Promise<string>;
 
   constructor(opts?: {
     spawnFn?: SpawnFn;
     claudePath?: string;
-    /** 注入模板可只声明 input 参数（TS 少参数函数可赋值）；task 仅默认模板使用 */
-    promptTemplate?: (input: string, task: RunnerTask) => string;
+    /** 注入模板可只声明 input 参数（TS 少参数函数可赋值）；task/workspaceDir 仅默认模板使用 */
+    promptTemplate?: (input: string, task: RunnerTask, workspaceDir: string) => string | Promise<string>;
   }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.claudePath = opts?.claudePath ?? DEFAULT_CLAUDE_PATH;
@@ -105,7 +135,7 @@ export class ClaudeCodeRunner implements AgentRunner {
     req.signal.throwIfAborted();
 
     const task: RunnerTask = req.task ?? "turn";
-    const prompt = this.promptTemplate(req.playerInput, task);
+    const prompt = await this.promptTemplate(req.playerInput, task, req.workspaceDir);
 
     // 构造 spawn opts，abort listener 通过 opts._child kill 子进程
     const spawnOpts: SpawnOpts = {
@@ -121,6 +151,11 @@ export class ClaudeCodeRunner implements AgentRunner {
       clearKillTimer = killChildGradual(spawnOpts._child);
     };
     req.signal.addEventListener("abort", onAbort);
+
+    // done.json 早退看门狗基线（spawn 前 fs 时戳快照；正常流程 orchestrator
+    // 已 unlink done.json，基线为 null）
+    const doneBaseline = await statDoneMtime(req.workspaceDir);
+    const watcher = startDoneWatcher(spawnOpts, req.workspaceDir, doneBaseline);
 
     try {
       req.signal.throwIfAborted();
@@ -158,7 +193,10 @@ export class ClaudeCodeRunner implements AgentRunner {
         };
       }
 
-      if (result.code !== 0) {
+      // 看门狗已开火：done.json 新鲜落盘且 status=success，claude 被 SIGTERM
+      // （退出码非 0 是 kill 的预期结果）。跳过退出码检查——权威交给
+      // orchestrator 的 done.json/output 校验链，fail-closed 不变
+      if (result.code !== 0 && !watcher.fired) {
         const signalInfo = result.code === null ? " (killed by signal)" : "";
         return {
           success: false,
@@ -181,6 +219,7 @@ export class ClaudeCodeRunner implements AgentRunner {
         detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
       };
     } finally {
+      watcher.stop();
       req.signal.removeEventListener("abort", onAbort);
       // 清理 SIGKILL escalate timer，避免 event loop 延迟 5s 退出
       clearKillTimer?.();
@@ -192,13 +231,85 @@ export class ClaudeCodeRunner implements AgentRunner {
  * 渐进 kill 子进程：先 SIGTERM，宽限后 escalate SIGKILL。
  * child 为 undefined 时 no-op（spawnFn 尚未挂载 _child）。
  *
- * @returns clear 函数，调用以清理 SIGKILL escalate timer，避免 event loop 延迟退出
+ * @returns clear 函数，调用以清理 SIGKILL escalate timer，避免 event loop 延迟 5s 退出
  */
 function killChildGradual(child?: { kill(sig: string): void }): () => void {
   if (!child) return () => {};
   child.kill("SIGTERM");
   const timer = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
   return () => clearTimeout(timer);
+}
+
+/** done.json 看门狗轮询间隔（ms） */
+const DONE_WATCH_INTERVAL_MS = 200;
+
+/** claude 路径早退开关（默认开；CLAUDE_EARLY_EXIT=0 关闭以便排查对照） */
+function earlyExitEnabled(): boolean {
+  return process.env.CLAUDE_EARLY_EXIT !== "0";
+}
+
+interface DoneWatchHandle {
+  stop(): void;
+  /** 看门狗已判定 done.json 完成并发出 SIGTERM */
+  fired: boolean;
+}
+
+async function statDoneMtime(workspaceDir: string): Promise<number | null> {
+  try {
+    return (await fs.stat(path.join(workspaceDir, "turn", "done.json"))).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * done.json 早退看门狗（init/turn 通用）。
+ * 时间解剖实测：claude 在 done.json 落盘后还会跑数十秒的自查/返工/告别
+ * 陈词，用户全程盯着进度条。契约已改为"done.json 永远是最后一步"，故
+ * done.json 新鲜落盘且 status=success 即 SIGTERM 砍掉 post-done 尾巴。
+ * 新鲜度 = mtime 严格新于 spawn 前基线（fs 对 fs，规避时钟偏差与上回合
+ * 残留误杀——同 pi-runner 看门狗）。杀早了的内容缺陷由 orchestrator
+ * 的 output 校验 + validateInitWorkspace 兜底（整轮回滚，fail-closed）。
+ */
+function startDoneWatcher(
+  spawnOpts: SpawnOpts,
+  workspaceDir: string,
+  baseline: number | null,
+): DoneWatchHandle {
+  if (!earlyExitEnabled()) return { stop: () => {}, fired: false };
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const handle: DoneWatchHandle = {
+    fired: false,
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+  const tick = async () => {
+    if (stopped) return;
+    let complete = false;
+    try {
+      const donePath = path.join(workspaceDir, "turn", "done.json");
+      const mtime = (await fs.stat(donePath)).mtimeMs;
+      if (baseline === null || mtime > baseline) {
+        const parsed = JSON.parse(await fs.readFile(donePath, "utf8")) as { status?: unknown };
+        complete = parsed.status === "success";
+      }
+    } catch {
+      complete = false;
+    }
+    if (stopped) return;
+    if (complete) {
+      handle.fired = true;
+      handle.stop();
+      spawnOpts._child?.kill("SIGTERM");
+      return;
+    }
+    timer = setTimeout(tick, DONE_WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
+  };
+  timer = setTimeout(tick, DONE_WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
+  return handle;
 }
 
 /** 构造 claude 子进程 env：process.env 白名单 + runner 固定配置 */

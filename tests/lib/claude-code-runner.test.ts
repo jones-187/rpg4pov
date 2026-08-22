@@ -258,3 +258,111 @@ describe("ClaudeCodeRunner", () => {
     expect(result.detail).toContain("spawn ENOENT");
   });
 });
+
+// --- init 三刀（P2 时间解剖优化）：骨架预注入 + done.json 看门狗 ---
+
+describe("ClaudeCodeRunner init 三刀", () => {
+  it("task=init 默认模板预注入骨架文件内容（story/world/player/rules 原文）", async () => {
+    const meta = await createStory();
+    const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+    const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+    await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "深夜酒馆设定",
+      task: "init",
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(calls[0].opts.stdinData).toContain("已预注入的骨架文件");
+    expect(calls[0].opts.stdinData).toContain("=== story.md ===");
+    expect(calls[0].opts.stdinData).toContain("=== rules.md ===");
+  });
+
+  it("done.json 看门狗：新鲜 success done.json 落盘即 SIGTERM，非零退出码仍判成功", async () => {
+    const meta = await createStory();
+    let killed = false;
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      await fs.mkdir(path.join(opts.cwd, "turn"), { recursive: true });
+      await fs.writeFile(
+        path.join(opts.cwd, "turn", "done.json"),
+        JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+      );
+      return await new Promise<SpawnResult>((resolve) => {
+        opts._child = {
+          kill: () => {
+            killed = true;
+            resolve({ code: 143, stdout: "", stderr: "" });
+          },
+        };
+      });
+    };
+    const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+    const result = await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      playerInput: "设定",
+      task: "init",
+      signal: AbortSignal.timeout(8000),
+    });
+    expect(result.success).toBe(true);
+    expect(killed).toBe(true);
+  });
+
+  it("旧 done.json（mtime 不新于基线）不触发看门狗", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.mkdir(path.join(dir, "turn"), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "turn", "done.json"),
+      JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+    );
+    let killed = false;
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      opts._child = { kill: () => { killed = true; } };
+      await new Promise((r) => setTimeout(r, 500));
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+    const result = await runner.runTurn({
+      storyId: meta.storyId,
+      workspaceDir: dir,
+      playerInput: "设定",
+      task: "init",
+      signal: AbortSignal.timeout(8000),
+    });
+    expect(result.success).toBe(true);
+    expect(killed).toBe(false);
+  });
+
+  it("CLAUDE_EARLY_EXIT=0 关闭看门狗", async () => {
+    const saved = process.env.CLAUDE_EARLY_EXIT;
+    process.env.CLAUDE_EARLY_EXIT = "0";
+    try {
+      const meta = await createStory();
+      let killed = false;
+      const spawn: SpawnFn = async (_cmd, _args, opts) => {
+        await fs.mkdir(path.join(opts.cwd, "turn"), { recursive: true });
+        await fs.writeFile(
+          path.join(opts.cwd, "turn", "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        opts._child = { kill: () => { killed = true; } };
+        await new Promise((r) => setTimeout(r, 400));
+        return { code: 0, stdout: "", stderr: "" };
+      };
+      const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+      const result = await runner.runTurn({
+        storyId: meta.storyId,
+        workspaceDir: resolveWorkspaceDir(meta.storyId),
+        playerInput: "设定",
+        task: "init",
+        signal: AbortSignal.timeout(8000),
+      });
+      expect(result.success).toBe(true);
+      expect(killed).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_EARLY_EXIT;
+      else process.env.CLAUDE_EARLY_EXIT = saved;
+    }
+  });
+});

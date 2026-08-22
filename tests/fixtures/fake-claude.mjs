@@ -70,7 +70,8 @@ async function main() {
   // 写开场 output（Issue 9 首行标题契约）+ done.json。
   if (stdinData.includes("初始化 agent")) {
     const settingMatch = stdinData.match(
-      /## 用户设定（canon，优先级最高）\n([\s\S]*?)\n## 工作流程/,
+      // 用户设定段之后紧跟骨架预注入段（P2：占位文件内容注入 prompt）
+      /## 用户设定（canon，优先级最高）\n([\s\S]*?)\n## 已预注入的骨架文件/,
     );
     const setting = settingMatch ? settingMatch[1].trim() : "";
     await fs.writeFile(

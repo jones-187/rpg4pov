@@ -157,8 +157,12 @@ DO NOT:
 ## 用户设定（canon，优先级最高）
 {PLAYER_INPUT}
 
+## 已预注入的骨架文件（无需读取）
+以下为当前 workspace 占位文件的完整内容（仅为结构参考，均待你填充；turns/history.jsonl 为空，不在下方列出）：
+{SKELETON_CONTEXT}
+
 ## 工作流程
-1. 读取现有占位文件了解结构：story.md, world.md, player.md, rules.md
+1. 不要读取任何文件——骨架文件内容已完整预注入上方，全部待你填充
 2. 生成初始化内容：
    - world.md：小场景世界设定——地点（有限几个）、时间、氛围、隐藏事实（God State，主角未知）；必须包含足以支撑后续有效变化的矛盾、秘密、风险或压力源（Issue 8 材料）
    - player.md：主角角色卡（用户给出的主角内容必须原文保留）+ 初始状态 + 主角已知信息 + Protagonist Core：narrativeVoice、temperament、emotionalExpression、conflictStyle、relationshipStyle、humorStyle、initiative、moralBoundaries、speechPatterns、avoidExpressions；第一人称叙述基调与心理描写偏好；agency boundaries（哪些低风险表现可由系统自动演出、哪些重大决定必须交还玩家）
@@ -169,9 +173,10 @@ DO NOT:
      · Emotionally Salient Memories（初始 0-2 条，每条含 event 发生了什么 / meaning 她如何理解 / impact 为什么重要、如何影响她）：只放过去的关键事件，普通往事不列
      · Current Intent（初始意图块，供回合 agent 每回合读取更新）：currentEmotion / emotionalTrigger / emotionalConflict（互相冲突的欲望）/ immediateGoal / hiddenIntent / restraint（为何不直接按 hiddenIntent 行动）/ behaviorStrategy / voice
      初始关系不得因故事标签含恋爱/后宫/修罗场就默认所有核心 NPC 对主角产生恋爱情感；初始应是普通同事、熟悉、好奇、轻微欣赏、未完成旧关系、戒备、互相利用、工作默契、习惯性依赖、潜在吸引、愧疚、竞争、信任或不信任等——真正的喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得
-3. 写 turn/output.md：开场主角视窗——默认第一人称、主角限知视角；用户设定明确指定其他叙事视角时以其为 canon，并在 player.md 的 Protagonist Core（narrativeVoice）记录该视角约定，后续回合沿用。只含主角能感知的信息。第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
-4. 写 turn/interaction.json：开场交互状态，格式 \`{"mode":"continue"|"decision","suggestions":[]}\`。开场通常为 continue（连续演出阶段、无建议）；只有开场即停在真正需要玩家决定的位置时才用 decision 并给出 0-4 条符合建议门槛的建议
-5. 写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}
+3. **尽量批量落盘**：把已生成的内容在同一条回复里并发多个 Write 调用写完（例如一次写 world.md + player.md + rules.md，再一次写完全部 actors/*.md），不要一个文件一轮对话地顺序写——每次工具往返都让用户多等数秒
+4. 写 turn/output.md：开场主角视窗——默认第一人称、主角限知视角；用户设定明确指定其他叙事视角时以其为 canon，并在 player.md 的 Protagonist Core（narrativeVoice）记录该视角约定，后续回合沿用。只含主角能感知的信息。第一行必须是 \`${TURN_OUTPUT_HEADING}\`（一级标题，原样保留），正文只写叙事，不使用 JSON/结构化格式
+5. 写 turn/interaction.json：开场交互状态，格式 \`{"mode":"continue"|"decision","suggestions":[]}\`。开场通常为 continue（连续演出阶段、无建议）；只有开场即停在真正需要玩家决定的位置时才用 decision 并给出 0-4 条符合建议门槛的建议
+6. **最后一步**才写 turn/done.json：{"status":"success","completedAt":"<ISO 8601 时间>"}。写完立即结束——不要重新读取文件复查，不要输出收尾总结（系统检测到 done.json 落盘即结束会话）；任何文件未完成前绝不写 done.json
 
 ## 约束
 - 用户设定中的明确内容（角色卡、人物关系、世界规则、基调）视为 canon：原文保留，不得改写或删除；只补全用户未定义的部分
@@ -183,6 +188,15 @@ DO NOT:
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
 - 仅可写 world.md、player.md、rules.md、actors/**、turn/output.md、turn/interaction.json、turn/done.json，不得创建其他文件`;
 
-export function buildInitPrompt(setting: string): string {
-  return STORY_INIT_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => setting);
+/**
+ * 填充初始化 prompt。skeletonContext 为骨架文件预注入段（由 runner 读取
+ * workspace 占位文件生成；缺省为空——注入段说明见模板占位 {SKELETON_CONTEXT}）。
+ * 时间解剖实测：init 前 5 轮微型往返全是骨架探索（Read×4 + find + Glob），
+ * 预注入直接消灭这段开销。
+ */
+export function buildInitPrompt(setting: string, skeletonContext = ""): string {
+  return STORY_INIT_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => setting).replace(
+    "{SKELETON_CONTEXT}",
+    () => skeletonContext,
+  );
 }
