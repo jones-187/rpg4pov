@@ -150,8 +150,8 @@ _Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.
 _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
 
 ### Pi Runner（pi 运行器）
-性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。随机判定经 Pre-rolled Random Pool 由服务端权威落账。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
-_Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash 工具
+性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件，工具面收窄至 write），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。随机判定经 Pre-rolled Random Pool 由服务端权威落账。预注入顺序按变化频率升序（稳定段前置，吃网关跨请求前缀缓存）；三产物落盘即早退（看门狗 SIGTERM，跳过收尾往返）；角色卡超预算时注入瘦身指令防长局 prefill 漂移。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
+_Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash/read 工具、qwen 思考档位调参（网关无视且 low/off 诱发口述失效）
 
 ### State Update Bundle（状态变更单）
 `turn/state-update.md`：Pi Runner 回合中全部状态文件变更的合并载体（每段 `=== FILE: 文件名 ===` + APPEND/REPLACE 行）。服务端解析并应用到白名单内文件（world/player/actors/adjustments/tendencies），白名单外或解析失败降级不致命。另有 `=== RANDOM ===` 申报段承载 Pre-rolled Random Pool 的消耗申报（不是文件段，由服务端核对落账）。是回合内部中间产物，不是故事状态本身。

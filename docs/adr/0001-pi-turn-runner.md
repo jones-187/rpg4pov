@@ -16,5 +16,11 @@
 
 - **随机判定经预掷随机数池进入 pi 回合路径**（初版"暂不进入"已被推翻——随机判定是产品红线，不得缺席任何 turn 路径）：pi prompt 禁 bash（工具调用可靠性），agent 无法调 roll-choice CLI；等价通道为服务端 crypto 预生成 6 个 `[0,1)` 样本注入 prompt 末尾，模型按序消耗做 Roll Choice，在 state-update.md `=== RANDOM ===` 段申报，服务端用自持样本**重算权威结果**按同形状落账 random-rolls.jsonl（`random-tool.ts recordPoolRoll`），orchestrator 泄密守卫零改动继续生效。信任模型与 claude 路径对齐：样本真随机（服务端 crypto）、候选权重由 agent 自定（claude 路径同样如此）、服从性靠 prompt 约束；服务端额外多一层申报不一致（mismatch）诊断信号。池在回合内跨重试固定（防故意失败刷点）；消耗严格按 R1,R2,… 顺序核对（防挑号）。
 - **qwen 工具调用可靠性装甲**：实测 1/6 概率"口述不写盘"（输出文件缺失），PiRunner 自动重试一次（`PI_MAX_ATTEMPTS`，默认 2）。
+- **二轮优化（2026-08-22 token 分解实测驱动；回合为解码瓶颈，call#1 输出 ~5k token 中 ~65% 是 qwen 隐式思考）**：
+  - **网关跨请求前缀缓存实测有效**（同前缀下一请求 cacheRead ~8.4k token；早前"跨请求不缓存"的结论有误）。user prompt 注入顺序按变化频率升序重排：rules → adjustments → tendencies → player → world → actors → history → 输入 → 随机池——history 原本置首，每回合轮转一行即打穿其后全部缓存。
+  - **早退看门狗**：三产物落盘且形状合法（output 首行契约 + interaction 可解析）即 SIGTERM pi，跳过第二次 LLM 往返（实测该趟仅输出"回合完成"23 token，却要 4.3k fresh prefill + 整套网关往返）。新鲜度以 attempt 前 mtime 基线判定（fs 对 fs 比较——WSL2 下 mtime 滞后 Date.now() 数毫秒，墙钟比较会误杀）；SIGTERM 的非 0 退出码由 fired 标记豁免，撕裂写走既有重试自愈。`PI_EARLY_EXIT=0` 可关。
+  - **`--tools write` 工具面收窄**：读/bash/edit 从模型工具列表移除，prompt 措辞约束升级为结构性不存在。
+  - **角色卡预算**（`PI_ACTOR_BUDGET_BYTES`，默认 6KB）：超预算卡在 prompt 注入 REPLACE 修剪指令（合并重复、删过时证据，保 Emotional Core / Relationship State）——实测 actors 第 3 回合即可达 ~19.6KB，长局 prefill 漂移是回合时延劣化主因。服务端只发指令不硬截断，故事真相取舍留给模型。
+  - **qwen 思考档位实测不可用**：`--thinking low` 直接诱发"口述不写盘"（与 `:off` 同病），`minimal` 被网关无视（输出 token 不降反升）——与 budget_tokens / no_think 一致，此路不通；解码成本中思考占比不可控是 pi+qwen+该网关组合的结构地板。
 - **权限治理换轨**（见 claude-code-runner 注释）：claude CLI 2.1.140 + 网关环境下 settings 路径规则对 Write 调用完全不匹配，init 改 `--tools=Read,Write` + auto；orchestrator 新增受保护路径基线守卫（story.md / turn/input.md 与既有 history 守卫同级，fail-closed）。
 - 模型锁定 qwen-fp8（项目约束）；pi 锁 0.73.1（Dockerfile）。

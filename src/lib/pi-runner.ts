@@ -33,6 +33,8 @@ const DEFAULT_PI_PATH = "pi";
 const SIGKILL_GRACE_MS = 5_000;
 /** 每回合预掷样本数（超时叙事权衡兜底，池在 runTurn 内跨重试固定） */
 const ROLL_POOL_SIZE = 6;
+/** 早退看门狗轮询间隔 */
+const WATCH_INTERVAL_MS = 200;
 
 /** 从 process.env 传递给 pi 的白名单（models.json 已含密钥，不传 token） */
 const PI_ENV_WHITELIST = ["PATH", "HOME", "NODE_ENV", "TMPDIR"];
@@ -80,6 +82,124 @@ function killChildGradual(child?: { kill(sig: string): void }): () => void {
   return () => clearTimeout(timer);
 }
 
+/** 早退开关（默认开；PI_EARLY_EXIT=0 关闭以便排查对照） */
+function earlyExitEnabled(): boolean {
+  return process.env.PI_EARLY_EXIT !== "0";
+}
+
+interface WatchHandle {
+  stop(): void;
+  /** 看门狗已判定产物齐全并发出 SIGTERM */
+  fired: boolean;
+}
+
+/** 三产物的 mtime 基线（attempt 开始前快照；null = 当时不存在） */
+interface ArtifactMtimes {
+  output: number | null;
+  interaction: number | null;
+  stateUpdate: number | null;
+}
+
+async function statArtifactMtimes(workspaceDir: string): Promise<ArtifactMtimes> {
+  const turnDir = path.join(workspaceDir, "turn");
+  const get = async (f: string): Promise<number | null> => {
+    try {
+      return (await fs.stat(path.join(turnDir, f))).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    output: await get("output.md"),
+    interaction: await get("interaction.json"),
+    stateUpdate: await get("state-update.md"),
+  };
+}
+
+async function freshFileOk(
+  file: string,
+  baseline: number | null,
+  validate: (raw: string) => boolean,
+): Promise<boolean> {
+  try {
+    const stat = await fs.stat(file);
+    // 新鲜度 = 严格新于 attempt 前基线（fs 时间戳对 fs 时间戳，规避
+    // WSL2 下 mtime 滞后 Date.now() 数毫秒的时钟偏差）；基线 null = 原
+    // 本不存在，任何落盘都算新。防止上一 attempt 残留触发误杀。
+    if (baseline !== null && stat.mtimeMs <= baseline) return false;
+    const raw = await fs.readFile(file, "utf8");
+    return raw.trim() !== "" && validate(raw);
+  } catch {
+    return false;
+  }
+}
+
+/** 三产物齐且形状合法（撕裂写防御）：output 首行契约 + interaction 可解析 */
+async function turnArtifactsComplete(workspaceDir: string, baselines: ArtifactMtimes): Promise<boolean> {
+  const turnDir = path.join(workspaceDir, "turn");
+  const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
+    const first = raw.split("\n").find((l) => l.trim() !== "");
+    return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
+  });
+  if (!outputOk) return false;
+  const interactionOk = await freshFileOk(
+    path.join(turnDir, "interaction.json"),
+    baselines.interaction,
+    (raw) => {
+      try {
+        JSON.parse(raw);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  );
+  if (!interactionOk) return false;
+  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, () => true);
+}
+
+/**
+ * 早退看门狗：三产物落盘并校验通过即 SIGTERM pi，砍掉第二次 LLM 往返
+ * （实测那趟只为输出"回合完成"23 token，却要 prefill 4.3k fresh + 整套
+ * 网关往返，值 3-8s）。SIGTERM 后 pi 退出码非 0——由 fired 标记跳过
+ * 退出码检查直接进产物校验；撕裂写（校验不过）按既有循环自愈重试。
+ */
+function startEarlyExitWatcher(
+  spawnOpts: SpawnOpts,
+  workspaceDir: string,
+  baselines: ArtifactMtimes,
+): WatchHandle {
+  if (!earlyExitEnabled()) return { stop: () => {}, fired: false };
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const handle: WatchHandle = {
+    fired: false,
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+  const tick = async () => {
+    if (stopped) return;
+    let complete = false;
+    try {
+      complete = await turnArtifactsComplete(workspaceDir, baselines);
+    } catch {
+      complete = false;
+    }
+    if (stopped) return;
+    if (complete) {
+      handle.fired = true;
+      handle.stop();
+      spawnOpts._child?.kill("SIGTERM");
+      return;
+    }
+    timer = setTimeout(tick, WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
+  };
+  timer = setTimeout(tick, WATCH_INTERVAL_MS) as unknown as NodeJS.Timeout;
+  return handle;
+}
+
 export class PiRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly piPath: string;
@@ -107,6 +227,9 @@ export class PiRunner implements AgentRunner {
       "--no-session",
       "--model",
       resolvePiModel(),
+      // 工具面收窄到 write：契约本就禁止读/bash，列表里不存在比措辞约束更硬
+      "--tools",
+      "write",
       "--system-prompt",
       PI_TURN_SYSTEM_PROMPT,
       userPrompt,
@@ -130,11 +253,14 @@ export class PiRunner implements AgentRunner {
         clearKillTimer = killChildGradual(spawnOpts._child);
       };
       req.signal.addEventListener("abort", onAbort);
+      const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
+      const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines);
 
       let result: SpawnResult;
       try {
         result = await this.spawnFn(this.piPath, args, spawnOpts);
       } catch (err) {
+        watcher.stop();
         req.signal.removeEventListener("abort", onAbort);
         return {
           success: false,
@@ -144,23 +270,27 @@ export class PiRunner implements AgentRunner {
       } finally {
         clearKillTimer?.();
       }
+      watcher.stop();
       req.signal.removeEventListener("abort", onAbort);
 
       if (result.aborted || req.signal.aborted) {
         return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
       }
-      if (result.code !== 0) {
+      if (result.code !== 0 && !watcher.fired) {
         diagnostics.push(
           `attempt ${attempt}: pi exit=${result.code}\n${sanitizeForLog(result.stdout + "\n" + result.stderr).slice(0, 2000)}`,
         );
         continue;
+      }
+      if (watcher.fired) {
+        diagnostics.push(`attempt ${attempt}: early-exit fired (artifacts complete, skip final round-trip)`);
       }
 
       const output = await readOutputIfExists(req.workspaceDir);
       if (output === null) {
         // "口述不写盘"失效模式：重试（最后一次尝试的诊断由下方汇总）
         diagnostics.push(
-          `attempt ${attempt}: pi exited 0 but turn/output.md missing\n${sanitizeForLog(result.stdout).slice(0, 2000)}`,
+          `attempt ${attempt}: pi exit=${result.code} but turn/output.md missing\n${sanitizeForLog(result.stdout).slice(0, 2000)}`,
         );
         continue;
       }
@@ -180,9 +310,12 @@ export class PiRunner implements AgentRunner {
       }
       mergeDiags.push(...(await recordRollDeclarations(req, rollPool, rolls)));
       await writeDoneMarker(req.workspaceDir);
+      const notes: string[] = [];
+      if (watcher.fired) notes.push("early-exit fired (skipped final round-trip)");
+      if (mergeDiags.length > 0) notes.push(`state-update notes: ${mergeDiags.join("; ").slice(0, 2000)}`);
       return {
         success: true,
-        detail: mergeDiags.length > 0 ? `state-update notes: ${mergeDiags.join("; ").slice(0, 2000)}` : undefined,
+        detail: notes.length > 0 ? notes.join("; ") : undefined,
       };
     }
 

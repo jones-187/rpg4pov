@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { buildTurnUserPrompt, PI_TURN_SYSTEM_PROMPT, resolveHistoryLimit } from "@/lib/pi-prompt";
+import { buildTurnUserPrompt, PI_TURN_SYSTEM_PROMPT, resolveHistoryLimit, resolveActorBudgetBytes } from "@/lib/pi-prompt";
 import { buildPiModelsJson, ensurePiConfig, resolvePiAgentDir } from "@/lib/pi-config";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
@@ -50,6 +50,44 @@ describe("buildTurnUserPrompt", () => {
     expect(prompt).toContain("我下楼吃面");
   });
 
+  it("注入顺序按变化频率升序：rules → world → actors → history → 输入 → 随机池（前缀缓存友好）", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.writeFile(path.join(dir, "actors", "lin.md"), "# NPC：林掌柜\n");
+    await appendTurnHistory(meta.storyId, {
+      turnId: "t1",
+      at: new Date().toISOString(),
+      input: "开场",
+      output: "# 主角视窗\n开场白",
+    });
+
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门", [0.5]);
+
+    const pos = (marker: string) => prompt.indexOf(marker);
+    expect(pos("=== rules.md ===")).toBeLessThan(pos("=== adjustments.md ==="));
+    expect(pos("=== adjustments.md ===")).toBeLessThan(pos("=== tendencies.md ==="));
+    expect(pos("=== tendencies.md ===")).toBeLessThan(pos("=== player.md ==="));
+    expect(pos("=== player.md ===")).toBeLessThan(pos("=== world.md ==="));
+    expect(pos("=== world.md ===")).toBeLessThan(pos("=== actors/lin.md ==="));
+    expect(pos("=== actors/lin.md ===")).toBeLessThan(pos("=== turns/history.jsonl"));
+    expect(pos("=== turns/history.jsonl")).toBeLessThan(pos("我推门"));
+    expect(pos("我推门")).toBeLessThan(pos("=== 随机数池"));
+  });
+
+  it("角色卡超预算 → 注入瘦身附加指令；未超 → 无该段", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.writeFile(path.join(dir, "actors", "slim.md"), "# NPC：小卡\n");
+    await fs.writeFile(path.join(dir, "actors", "fat.md"), `${"# NPC：大卡\n证据行。".repeat(400)}\n`);
+
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
+
+    expect(prompt).toContain("=== 本回合附加指令 ===");
+    expect(prompt).toContain("actors/fat.md 已超出精简预算");
+    expect(prompt).toContain("REPLACE 修剪");
+    expect(prompt).not.toContain("actors/slim.md 已超出精简预算");
+  });
+
   it("history 只取最近 N 条（默认 5）", async () => {
     const meta = await createStory();
     const dir = resolveWorkspaceDir(meta.storyId);
@@ -87,6 +125,22 @@ describe("buildTurnUserPrompt", () => {
     const dir = resolveWorkspaceDir(meta.storyId);
     const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
     expect(prompt).not.toContain("随机数池");
+  });
+
+  it("resolveActorBudgetBytes：默认 6144，env 可调且带夹取", () => {
+    const saved = process.env.PI_ACTOR_BUDGET_BYTES;
+    try {
+      expect(resolveActorBudgetBytes()).toBe(6144);
+      process.env.PI_ACTOR_BUDGET_BYTES = "999";
+      expect(resolveActorBudgetBytes()).toBe(2048); // 下夹取
+      process.env.PI_ACTOR_BUDGET_BYTES = "99999999";
+      expect(resolveActorBudgetBytes()).toBe(65536); // 上夹取
+      process.env.PI_ACTOR_BUDGET_BYTES = "8192";
+      expect(resolveActorBudgetBytes()).toBe(8192);
+    } finally {
+      if (saved === undefined) delete process.env.PI_ACTOR_BUDGET_BYTES;
+      else process.env.PI_ACTOR_BUDGET_BYTES = saved;
+    }
   });
 });
 

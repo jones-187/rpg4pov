@@ -160,12 +160,76 @@ describe("PiRunner", () => {
     expect(calls[0].args).toContain("-p");
     expect(calls[0].args).toContain("--no-session");
     expect(calls[0].args).toContain("qwen-fp8");
+    // 工具面收窄：只允许 write（读/bash 从模型视野移除）
+    const toolsIdx = calls[0].args.indexOf("--tools");
+    expect(toolsIdx).toBeGreaterThan(-1);
+    expect(calls[0].args[toolsIdx + 1]).toBe("write");
     const userPrompt = calls[0].args[calls[0].args.length - 1];
     expect(userPrompt).toContain("=== world.md ===");
     expect(userPrompt).toContain("=== turns/history.jsonl");
     expect(userPrompt).toContain("我下楼吃面");
     expect(calls[0].opts.cwd).toBe(dir);
   });
+
+  it("早退看门狗：三产物落盘后 SIGTERM，跳过第二次往返仍判成功", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const files = {
+      "turn/output.md": OUTPUT_MD,
+      "turn/interaction.json": INTERACTION_JSON,
+      "turn/state-update.md": STATE_UPDATE_MD,
+    };
+    // mock：写完三产物后"挂住"模拟第二次 LLM 往返，被 kill 才返回 143
+    let killed = false;
+    const spawn: SpawnFn = async (cmd, args, opts) => {
+      for (const [file, content] of Object.entries(files)) {
+        const target = path.join(opts.cwd, file);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content);
+      }
+      return await new Promise((resolve) => {
+        opts._child = {
+          kill: () => {
+            killed = true;
+            resolve({ code: 143, stdout: "", stderr: "" });
+          },
+        };
+      });
+    };
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(killed).toBe(true); // 看门狗确实提前击杀
+    expect(result.success).toBe(true); // fired 跳过退出码检查，产物校验通过
+    expect(result.detail).toContain("early-exit fired");
+    await expect(fs.readFile(path.join(dir, "turn", "done.json"), "utf8")).resolves.toContain("success");
+  }, 10_000);
+
+  it("看门狗不误杀：attempt 开始前已存在的旧产物（mtime 过旧）不触发早退", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    // 预置三个合法产物但 mtime 设为过去——模拟上一 attempt 残留
+    await fs.mkdir(path.join(dir, "turn"), { recursive: true });
+    await fs.writeFile(path.join(dir, "turn", "output.md"), OUTPUT_MD);
+    await fs.writeFile(path.join(dir, "turn", "interaction.json"), INTERACTION_JSON);
+    await fs.writeFile(path.join(dir, "turn", "state-update.md"), STATE_UPDATE_MD);
+    const past = new Date(Date.now() - 60_000);
+    for (const f of ["output.md", "interaction.json", "state-update.md"]) {
+      await fs.utimes(path.join(dir, "turn", f), past, past);
+    }
+    // mock：不写任何文件，600ms 后自然退出 0（给看门狗两个轮询窗口）
+    const spawn: SpawnFn = async () => {
+      await new Promise((r) => setTimeout(r, 600));
+      return { code: 0, stdout: "回合完成", stderr: "" };
+    };
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(result.detail ?? "").not.toContain("early-exit fired"); // 走自然退出路径
+  }, 10_000);
 
   it("随机判定：池注入 prompt，申报经服务端权威重算落账 random-rolls.jsonl", async () => {
     const meta = await createStory();

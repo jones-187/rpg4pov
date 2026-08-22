@@ -77,6 +77,22 @@ function parseTurnResponse(data: unknown): TurnHistoryEntry | null {
   };
 }
 
+/**
+ * 提交等待期的阶段化反馈文案。回合产物经工具写盘一次性返回，无法真流式；
+ * 阶段文案只描述正在发生的事（与实际执行阶段大致对齐，不做假进度承诺）。
+ */
+function pendingPhaseLabel(elapsedSec: number, initializing: boolean): string {
+  if (initializing) {
+    if (elapsedSec < 30) return "构建世界与人物…";
+    if (elapsedSec < 75) return "铺陈开场与隐藏张力…";
+    return "收束开场视窗…";
+  }
+  if (elapsedSec < 10) return "理解输入与当前局面…";
+  if (elapsedSec < 25) return "推进人物与事件…";
+  if (elapsedSec < 45) return "撰写主角视窗…";
+  return "生成交互建议…";
+}
+
 export default function StoryPage() {
   const params = useParams<{ storyId: string }>();
   const storyId = params.storyId;
@@ -90,6 +106,15 @@ export default function StoryPage() {
   const [setting, setSetting] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // 感知延迟优化：提交起计时 + 每秒重渲染驱动阶段文案
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (pendingSince === null) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [pendingSince]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +172,7 @@ export default function StoryPage() {
     onSuccess: () => void,
   ) {
     setLoading(true);
+    setPendingSince(Date.now());
     setError(null);
     try {
       const res = await fetch(url, {
@@ -171,6 +197,7 @@ export default function StoryPage() {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
       setLoading(false);
+      setPendingSince(null);
     }
   }
 
@@ -277,6 +304,14 @@ export default function StoryPage() {
             </button>
           )}
         </form>
+      )}
+      {loading && pendingSince !== null && (
+        <p className="muted" aria-live="polite">
+          {(() => {
+            const elapsed = Math.floor((Date.now() - pendingSince) / 1000);
+            return `${pendingPhaseLabel(elapsed, !initialized)}（已等待 ${elapsed} 秒）`;
+          })()}
+        </p>
       )}
       {initialized && interaction.mode === "decision" && interaction.suggestions.length > 0 && (
         <div className="suggestions" aria-label="建议选项">

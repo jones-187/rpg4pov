@@ -55,7 +55,7 @@ rollId 用语义短标识便于审计；本回合无判定需求则不写此段�
 === FILE: world.md ===
 APPEND: 要追加到该文件末尾的行（带小节标题）
 REPLACE: 旧文本（原文照抄一小段）→ 新文本
-只写有实际变化的文件段（world.md / player.md / actors/*.md / adjustments.md / tendencies.md），无变化的文件不出段，APPEND 与 REPLACE 各占一行可混用。
+只写有实际变化的文件段（world.md / player.md / actors/*.md / adjustments.md / tendencies.md），无变化的文件不出段，APPEND 与 REPLACE 各占一行可混用。状态文件保持精简：evidence/recentEvidence 类条目保留最近 3 条，过时或已被覆盖的内容用 REPLACE 删除或合并，不重复抄写文件中已有的信息。
 
 ## 红线
 禁止读取文件；禁止修改 story.md、turns/**、turn/input.md；禁止创建这三个文件之外的任何文件；不得泄漏 God State 真相、NPC hiddenIntent、内部日志、随机判定数值与申报内容。`;
@@ -65,6 +65,19 @@ export function resolveHistoryLimit(): number {
   const raw = process.env.PI_HISTORY_LIMIT;
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+}
+
+/**
+ * 单张角色卡的字节预算（超预算 → 回合 prompt 注入瘦身指令，模型经
+ * REPLACE 修剪过时内容）。只发指令不自动删——故事真相的取舍留给模型，
+ * 服务端不做硬截断。实测 actors 第 3 回合可达 ~19KB，长局 prefill 漂移
+ * 是回合时延劣化的主因之一。
+ */
+export function resolveActorBudgetBytes(): number {
+  const raw = process.env.PI_ACTOR_BUDGET_BYTES;
+  const parsed = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(parsed)) return 6144;
+  return Math.min(65_536, Math.max(2_048, Math.floor(parsed)));
 }
 
 async function readFileOrNull(file: string): Promise<string | null> {
@@ -77,8 +90,12 @@ async function readFileOrNull(file: string): Promise<string | null> {
 
 /**
  * 组装回合用户 prompt：预注入全部 workspace 状态 + 玩家输入 + 随机数池。
- * 组装顺序固定（稳定段在前、易变段在后），保证网关前缀缓存尽可能命中。
- * 随机数池放最末：每回合数值不同，前置会摧毁前缀缓存。
+ *
+ * 注入顺序按"变化频率升序"（稳定段在前、易变段在后）：网关跨请求前缀
+ * 缓存实测有效（同前缀下轮请求 cacheRead ~8k token），任何一字节变化都
+ * 会打穿其后全部缓存——rules 静态、adjustments/tendencies 低频、player
+ * 偶发 REPLACE、world 以 APPEND 为主前缀稳定、actors REPLACE 频繁、
+ * history 每回合轮转一行、输入与随机池必然全新，故置于末尾。
  */
 export async function buildTurnUserPrompt(
   workspaceDir: string,
@@ -89,13 +106,7 @@ export async function buildTurnUserPrompt(
   const parts: string[] = [];
   parts.push("执行本回合。以下为已预注入的 workspace 状态（禁止读取文件）：\n");
 
-  const historyRaw = (await readTurnHistoryRaw(storyId)) ?? "";
-  const historyLines = historyRaw.split("\n").filter((l) => l.trim() !== "");
-  const recent = historyLines.slice(-resolveHistoryLimit());
-  parts.push(`=== turns/history.jsonl（玩家可见历史，只读，最近 ${recent.length} 条）===`);
-  parts.push(recent.join("\n") || "（空）");
-
-  for (const file of ["rules.md", "world.md", "player.md", "adjustments.md", "tendencies.md"]) {
+  for (const file of ["rules.md", "adjustments.md", "tendencies.md", "player.md", "world.md"]) {
     const content = (await readFileOrNull(path.join(workspaceDir, file))) ?? "（空）";
     parts.push(`\n=== ${file} ===`);
     parts.push(content.trimEnd());
@@ -103,6 +114,8 @@ export async function buildTurnUserPrompt(
 
   const actorsDir = path.join(workspaceDir, "actors");
   let actors: string[] = [];
+  const oversized: string[] = [];
+  const actorBudget = resolveActorBudgetBytes();
   try {
     actors = (await fs.readdir(actorsDir)).filter((n) => n.endsWith(".md")).sort();
   } catch {
@@ -112,6 +125,22 @@ export async function buildTurnUserPrompt(
     const content = (await readFileOrNull(path.join(actorsDir, name))) ?? "";
     parts.push(`\n=== actors/${name} ===`);
     parts.push(content.trimEnd());
+    if (Buffer.byteLength(content, "utf8") > actorBudget) oversized.push(name);
+  }
+
+  const historyRaw = (await readTurnHistoryRaw(storyId)) ?? "";
+  const historyLines = historyRaw.split("\n").filter((l) => l.trim() !== "");
+  const recent = historyLines.slice(-resolveHistoryLimit());
+  parts.push(`\n=== turns/history.jsonl（玩家可见历史，只读，最近 ${recent.length} 条）===`);
+  parts.push(recent.join("\n") || "（空）");
+
+  if (oversized.length > 0) {
+    parts.push(`\n=== 本回合附加指令 ===`);
+    for (const name of oversized) {
+      parts.push(
+        `- actors/${name} 已超出精简预算：本回合 state-update 必须包含该文件的 REPLACE 修剪——合并重复条目、删除已被后续覆盖的过时证据与进展，保留 Emotional Core / Relationship State 与最新意图。`,
+      );
+    }
   }
 
   parts.push(`\n=== 本回合玩家输入（turn/input.md）===`);

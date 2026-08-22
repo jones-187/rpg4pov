@@ -93,7 +93,7 @@ docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
   turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5；含 opening 与 turn 两类条目）
 ```
 
-pi 回合运行时可调环境变量：`PI_HISTORY_LIMIT`（prompt 注入的历史条数上界，默认 5）、`PI_MAX_ATTEMPTS`（"口述不写盘"失效自动重试次数，默认 2、上限 3）、`PI_PATH`（pi 可执行文件路径覆盖，默认 `pi`）。模型经 `ANTHROPIC_MODEL` 指定，默认且验收锁定 `qwen-fp8`；pi 的 provider 配置（`~/.pi/agent/models.json`）由应用从 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）幂等生成，不进镜像。
+pi 回合运行时可调环境变量：`PI_HISTORY_LIMIT`（prompt 注入的历史条数上界，默认 5）、`PI_MAX_ATTEMPTS`（"口述不写盘"失效自动重试次数，默认 2、上限 3）、`PI_PATH`（pi 可执行文件路径覆盖，默认 `pi`）、`PI_EARLY_EXIT`（早退看门狗：三产物落盘即 SIGTERM 跳过收尾往返，默认开，`=0` 关闭）、`PI_ACTOR_BUDGET_BYTES`（单张角色卡字节预算，超限注入瘦身指令，默认 6144，夹取 2048-65536）。模型经 `ANTHROPIC_MODEL` 指定，默认且验收锁定 `qwen-fp8`；pi 的 provider 配置（`~/.pi/agent/models.json`）由应用从 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）幂等生成，不进镜像。
 
 主角可见输出只来自 `turn/output.md`；Web 不读取 agent stdout、logs、world、player、actors。
 玩家可见历史来自 `turns/history.jsonl`，是已提交的完整回合记录。
