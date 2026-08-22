@@ -6,7 +6,7 @@ import { isValidStoryId, RANDOM_ROLLS_LOG } from "./workspace";
 // 文件名常量定义在 workspace.ts（避免循环依赖），此处 re-export 保持既有导入不变
 export { RANDOM_ROLLS_LOG };
 
-export type RandomSource = "crypto" | "injected";
+export type RandomSource = "crypto" | "injected" | "pool";
 
 export type RollChoiceRng = () => number;
 
@@ -171,4 +171,74 @@ async function appendRandomLog(
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(`failed to append random log: ${detail}`);
   }
+}
+
+/**
+ * 预掷随机数池（pi 回合路径，Issue 5 判定契约的无 bash 等价物）。
+ *
+ * pi prompt 禁用 bash（工具调用可靠性），agent 无法调用 roll-choice CLI；
+ * 改由服务端在回合前生成一池 [0,1) 真随机样本注入 prompt，模型按序消耗。
+ * 池在 runTurn 内一次生成、跨重试固定——重试不能换号（防故意失败刷点）。
+ */
+export function generateRollPool(size: number, rng?: RollChoiceRng): number[] {
+  const n = Math.max(0, Math.floor(size));
+  const pool: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const sample = rng ? rng() : cryptoSample();
+    assertValidSample(sample);
+    pool.push(sample);
+  }
+  return pool;
+}
+
+export interface PoolRollRecordInput {
+  storyId: string;
+  workspaceDir: string;
+  rollId: string;
+  /** 来自服务端预生成池的样本值（服务端持有，模型不可自选） */
+  sample: number;
+  candidates: RollChoiceCandidate[];
+  /** 模型申报的判定结果；与服务端重算不一致记 mismatch（服从性异常信号，不失败回合） */
+  declaredSelectedId?: string;
+}
+
+export interface PoolRollRecordResult {
+  result: RollChoiceResult;
+  /** 申报结果 ≠ 权威重算结果 */
+  mismatch: boolean;
+}
+
+/**
+ * 服务端权威落账一次池判定：用自己持有的池样本重算加权选择（与
+ * rollChoice 完全同一算法），写入与 claude 路径同形状的审计日志行——
+ * orchestrator 的随机日志泄密守卫（readRandomRollLines）无需感知路径差异。
+ *
+ * 信任模型与 claude 路径对齐：样本真随机（crypto）、权重由 agent 自定
+ * （claude 路径中 agent 同样自选权重）、服从性靠 prompt 约束；此处多一层
+ * mismatch 信号用于诊断。日志由 Web 侧写入，agent 无权伪造。
+ */
+export async function recordPoolRoll(input: PoolRollRecordInput): Promise<PoolRollRecordResult> {
+  if (!isValidStoryId(input.storyId)) {
+    throw new Error("invalid storyId");
+  }
+  if (typeof input.workspaceDir !== "string" || input.workspaceDir.trim() === "") {
+    throw new Error("workspaceDir is required");
+  }
+  const rollId = normalizeRollId(input.rollId);
+  const { candidates, totalWeight } = normalizeCandidates(input.candidates);
+  assertValidSample(input.sample);
+
+  const selectedCandidate = selectCandidate(candidates, totalWeight, input.sample);
+  const result: RollChoiceResult = {
+    rollId,
+    selectedId: selectedCandidate.id,
+    selectedCandidate,
+    sample: input.sample,
+    randomSource: "pool",
+  };
+  await appendRandomLog(input.storyId, input.workspaceDir, result, candidates);
+  return {
+    result,
+    mismatch: input.declaredSelectedId !== undefined && input.declaredSelectedId !== selectedCandidate.id,
+  };
 }

@@ -115,3 +115,57 @@ describe("applyStateUpdates", () => {
     expect(player).toContain("追加行");
   });
 });
+
+describe("parseStateUpdate：=== RANDOM === 申报段", () => {
+  it("申报行进 rolls，不进文件段、不混入 APPEND 续行", () => {
+    const { sections, rolls, problems } = parseStateUpdate(
+      [
+        "=== FILE: world.md ===",
+        "APPEND: ## 时间线",
+        "=== RANDOM ===",
+        "R1: rollId=lockpick candidates=success:25,fail:75 → success",
+        "R2: rollId=perception candidates=notice:60,miss:40 → miss",
+        "=== FILE: player.md ===",
+        "APPEND: 状态行",
+      ].join("\n"),
+    );
+    expect(problems).toEqual([]);
+    expect(sections.map((s) => s.file)).toEqual(["world.md", "player.md"]);
+    // RANDOM 申报行没有被当作 world.md APPEND 的续行
+    expect(sections[0]!.ops).toEqual([{ kind: "append", text: "## 时间线" }]);
+    expect(rolls).toHaveLength(2);
+    expect(rolls[0]).toEqual({
+      index: 1,
+      rollId: "lockpick",
+      candidates: [
+        { id: "success", weight: 25 },
+        { id: "fail", weight: 75 },
+      ],
+      declaredSelectedId: "success",
+    });
+    expect(rolls[1]!.index).toBe(2);
+  });
+
+  it("申报行缺箭头结果仍可解析（declaredSelectedId 缺省）", () => {
+    const { rolls } = parseStateUpdate("=== RANDOM ===\nR1: rollId=a candidates=x:1,y:1");
+    expect(rolls[0]!.declaredSelectedId).toBeUndefined();
+    expect(rolls[0]!.candidates).toEqual([
+      { id: "x", weight: 1 },
+      { id: "y", weight: 1 },
+    ]);
+  });
+
+  it("畸形申报行记 problems 且跳过（权重非正、格式错乱）", () => {
+    const { rolls, problems } = parseStateUpdate(
+      [
+        "=== RANDOM ===",
+        "R1: rollId=a candidates=x:0,y:1 → x",
+        "R2: 瞎写一行",
+        "R3: rollId=b candidates=x:1 → x",
+      ].join("\n"),
+    );
+    expect(rolls.map((r) => r.rollId)).toEqual(["b"]);
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toContain("unparseable roll line");
+  });
+});

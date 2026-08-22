@@ -22,6 +22,14 @@ describe("PI_TURN_SYSTEM_PROMPT", () => {
     expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止读取文件");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止修改 story.md");
   });
+
+  it("随机判定契约：按序消耗、服从、RANDOM 申报、禁自造随机数", () => {
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("随机数池");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("=== RANDOM ===");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("R1: rollId=lockpick");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("必须服从");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止自造随机数");
+  });
 });
 
 describe("buildTurnUserPrompt", () => {
@@ -59,6 +67,26 @@ describe("buildTurnUserPrompt", () => {
     expect(prompt).toContain("输出8");
     expect(prompt).toContain("输出4");
     expect(prompt).not.toContain("输出3");
+  });
+
+  it("随机数池注入在最末（玩家输入之后），逐号展开 6 位小数", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门", [0.734211, 0.1]);
+
+    const inputIdx = prompt.indexOf("本回合玩家输入");
+    const poolIdx = prompt.indexOf("=== 随机数池");
+    expect(poolIdx).toBeGreaterThan(inputIdx);
+    expect(prompt).toContain("R1=0.734211");
+    expect(prompt).toContain("R2=0.100000");
+    expect(prompt.indexOf("按 system 提示执行本回合")).toBeGreaterThan(poolIdx);
+  });
+
+  it("rollPool 缺省为空：不注入随机数池段", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
+    expect(prompt).not.toContain("随机数池");
   });
 });
 

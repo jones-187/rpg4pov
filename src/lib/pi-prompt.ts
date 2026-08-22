@@ -40,6 +40,12 @@ player.md 是主角骨架：稳定第一人称声音，内心独白要具体（�
 写入 turn/interaction.json（整文件覆盖）：{"mode":"continue"|"decision","suggestions":[...]}
 decision=真正需玩家决定处（NPC 问话/关系变化/风险处理/承诺拒绝信任/不可逆）；建议 0-4 条回应同一戏剧问题、各有不同态度、不凑数、无建议给空数组。不放任何内部元数据。
 
+## 随机判定
+需要不确定性判定时（成功失败、发现与否、NPC 反应走向等）：自行定义候选与权重，按顺序消耗用户提示末尾的随机数池（从 R1 起，不可跳号、不可复用），R×总权重按权重区间落点确定结果。结果必须服从并体现在叙事中，不得展示数值或判定过程。每次判定在 turn/state-update.md 末尾申报一行：
+=== RANDOM ===
+R1: rollId=lockpick candidates=success:25,fail:75 → success
+rollId 用语义短标识便于审计；本回合无判定需求则不写此段；池耗尽后本回合不再掷，以叙事权衡处理。禁止自造随机数。
+
 ## 写盘（必须用工具，三个文件，一次并行发出）
 你必须调用 write 工具一次性创建以下三个文件（可在同一条消息里并行调用三个 write）。禁止把文件内容写在回复正文里；禁止使用 bash。全部写完后，最终回复只写"回合完成"四个字。
 
@@ -52,7 +58,7 @@ REPLACE: 旧文本（原文照抄一小段）→ 新文本
 只写有实际变化的文件段（world.md / player.md / actors/*.md / adjustments.md / tendencies.md），无变化的文件不出段，APPEND 与 REPLACE 各占一行可混用。
 
 ## 红线
-禁止读取文件；禁止修改 story.md、turns/**、turn/input.md；禁止创建这三个文件之外的任何文件；不得泄漏 God State 真相、NPC hiddenIntent、内部日志、判定结果。`;
+禁止读取文件；禁止修改 story.md、turns/**、turn/input.md；禁止创建这三个文件之外的任何文件；不得泄漏 God State 真相、NPC hiddenIntent、内部日志、随机判定数值与申报内容。`;
 
 /** prompt 注入的历史条数上界（跨请求前缀缓存友好：append-only、只取尾部） */
 export function resolveHistoryLimit(): number {
@@ -70,13 +76,15 @@ async function readFileOrNull(file: string): Promise<string | null> {
 }
 
 /**
- * 组装回合用户 prompt：预注入全部 workspace 状态 + 玩家输入。
+ * 组装回合用户 prompt：预注入全部 workspace 状态 + 玩家输入 + 随机数池。
  * 组装顺序固定（稳定段在前、易变段在后），保证网关前缀缓存尽可能命中。
+ * 随机数池放最末：每回合数值不同，前置会摧毁前缀缓存。
  */
 export async function buildTurnUserPrompt(
   workspaceDir: string,
   storyId: string,
   playerInput: string,
+  rollPool: number[] = [],
 ): Promise<string> {
   const parts: string[] = [];
   parts.push("执行本回合。以下为已预注入的 workspace 状态（禁止读取文件）：\n");
@@ -108,6 +116,12 @@ export async function buildTurnUserPrompt(
 
   parts.push(`\n=== 本回合玩家输入（turn/input.md）===`);
   parts.push(playerInput);
+
+  if (rollPool.length > 0) {
+    parts.push(`\n=== 随机数池（不确定性判定用，按序消耗；R×总权重落点定结果）===`);
+    parts.push(rollPool.map((sample, i) => `R${i + 1}=${sample.toFixed(6)}`).join("  "));
+  }
+
   parts.push("\n按 system 提示执行本回合。");
   return parts.join("\n");
 }

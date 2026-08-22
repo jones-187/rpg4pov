@@ -166,4 +166,90 @@ describe("PiRunner", () => {
     expect(userPrompt).toContain("我下楼吃面");
     expect(calls[0].opts.cwd).toBe(dir);
   });
+
+  it("随机判定：池注入 prompt，申报经服务端权威重算落账 random-rolls.jsonl", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const files = {
+      "turn/output.md": OUTPUT_MD,
+      "turn/interaction.json": INTERACTION_JSON,
+      "turn/state-update.md": [
+        "=== FILE: world.md ===",
+        "APPEND: ## 时间线",
+        "=== RANDOM ===",
+        "R1: rollId=lockpick candidates=success:25,fail:75 → fail",
+      ].join("\n"),
+    };
+    const { spawn, calls } = makeSpawn([files]);
+    // 0.9×100=90 落在 fail(25-100) 区间 → 权威结果 fail，与申报一致
+    const runner = new PiRunner({ spawnFn: spawn, rollRng: () => 0.9 });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    const userPrompt = calls[0].args[calls[0].args.length - 1];
+    expect(userPrompt).toContain("=== 随机数池");
+    expect(userPrompt).toContain("R1=0.900000");
+    expect(userPrompt).toContain("R6="); // 默认池 6 个样本
+
+    const raw = await fs.readFile(path.join(dir, "logs", "random-rolls.jsonl"), "utf8");
+    const line = JSON.parse(raw.trim()) as Record<string, unknown>;
+    expect(line).toMatchObject({
+      storyId: meta.storyId,
+      rollId: "lockpick",
+      type: "roll-choice",
+      selectedId: "fail",
+      randomSource: "pool",
+      sample: 0.9,
+    });
+  });
+
+  it("申报结果与权威重算不一致：回合仍成功，detail 记 mismatch", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const files = {
+      "turn/output.md": OUTPUT_MD,
+      "turn/interaction.json": INTERACTION_JSON,
+      "turn/state-update.md": [
+        "=== RANDOM ===",
+        "R1: rollId=persuade candidates=yes:50,no:50 → yes",
+      ].join("\n"),
+    };
+    const { spawn } = makeSpawn([files]);
+    const runner = new PiRunner({ spawnFn: spawn, rollRng: () => 0.9 }); // 0.9×100=90 → no
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(result.detail).toContain("declared yes but authoritative no");
+    const raw = await fs.readFile(path.join(dir, "logs", "random-rolls.jsonl"), "utf8");
+    const line = JSON.parse(raw.trim()) as Record<string, unknown>;
+    expect(line.selectedId).toBe("no"); // 落账以服务端重算为准
+  });
+
+  it("乱序申报跳过且不消耗号位；后续按序申报仍可落账", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const files = {
+      "turn/output.md": OUTPUT_MD,
+      "turn/interaction.json": INTERACTION_JSON,
+      "turn/state-update.md": [
+        "=== RANDOM ===",
+        "R2: rollId=jumped candidates=x:1 → x",
+        "R1: rollId=first candidates=x:1 → x",
+      ].join("\n"),
+    };
+    const { spawn } = makeSpawn([files]);
+    const runner = new PiRunner({ spawnFn: spawn, rollRng: () => 0.5 });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    expect(result.detail).toContain("roll skipped (out of order): R2, expected R1");
+    // 乱序 R2 未消耗号位，R1 仍按序落账
+    const raw = await fs.readFile(path.join(dir, "logs", "random-rolls.jsonl"), "utf8");
+    const lines = raw.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ rollId: "first", sample: 0.5 });
+  });
 });

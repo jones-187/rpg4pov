@@ -4,6 +4,8 @@ import path from "node:path";
 import {
   RANDOM_ROLLS_LOG,
   rollChoice,
+  recordPoolRoll,
+  generateRollPool,
   type RollChoiceCandidate,
 } from "@/lib/random-tool";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
@@ -246,5 +248,78 @@ describe("rollChoice", () => {
         rng: fixedRng(0.1),
       }),
     ).rejects.toThrow("random log");
+  });
+});
+
+describe("generateRollPool", () => {
+  it("生成指定数量的 [0,1) 样本，rng 可注入", () => {
+    expect(generateRollPool(3, fixedRng(0.42))).toEqual([0.42, 0.42, 0.42]);
+    expect(generateRollPool(0)).toEqual([]);
+  });
+
+  it("rng 返回非法样本时抛错", () => {
+    expect(() => generateRollPool(1, fixedRng(1.5))).toThrow("[0, 1)");
+  });
+});
+
+describe("recordPoolRoll", () => {
+  it("服务端重算权威结果并按 roll-choice 同形状落账", async () => {
+    const meta = await createStory({ title: "pool roll" });
+    const { result, mismatch } = await recordPoolRoll({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      rollId: "pool-lockpick",
+      // success:25 + fail:75，0.9×100=90 落在 fail 区间
+      sample: 0.9,
+      candidates: LOCKPICK_CANDIDATES,
+      declaredSelectedId: "fail",
+    });
+
+    expect(result.selectedId).toBe("fail");
+    expect(result.sample).toBe(0.9);
+    expect(result.randomSource).toBe("pool");
+    expect(mismatch).toBe(false);
+
+    const logs = await readRandomLogs(meta.storyId);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      storyId: meta.storyId,
+      rollId: "pool-lockpick",
+      type: "roll-choice",
+      selectedId: "fail",
+      randomSource: "pool",
+      sample: 0.9,
+    });
+  });
+
+  it("申报与权威重算不一致记 mismatch，不抛错", async () => {
+    const meta = await createStory({ title: "pool mismatch" });
+    const { result, mismatch } = await recordPoolRoll({
+      storyId: meta.storyId,
+      workspaceDir: resolveWorkspaceDir(meta.storyId),
+      rollId: "r",
+      sample: 0.1,
+      candidates: [
+        { id: "a", weight: 50 },
+        { id: "b", weight: 50 },
+      ],
+      declaredSelectedId: "b",
+    });
+    expect(result.selectedId).toBe("a");
+    expect(mismatch).toBe(true);
+  });
+
+  it("非法候选抛错且不落账", async () => {
+    const meta = await createStory({ title: "pool invalid" });
+    await expect(
+      recordPoolRoll({
+        storyId: meta.storyId,
+        workspaceDir: resolveWorkspaceDir(meta.storyId),
+        rollId: "r",
+        sample: 0.5,
+        candidates: [{ id: "only", weight: 0 }],
+      }),
+    ).rejects.toThrow("weight");
+    await expect(readRandomLogs(meta.storyId)).rejects.toThrow();
   });
 });

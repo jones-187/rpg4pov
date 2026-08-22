@@ -4,7 +4,8 @@ import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
 import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./claude-code-runner";
 import { ensurePiConfig, resolvePiModel } from "./pi-config";
 import { PI_TURN_SYSTEM_PROMPT, buildTurnUserPrompt } from "./pi-prompt";
-import { parseStateUpdate, applyStateUpdates } from "./state-update";
+import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
+import { generateRollPool, recordPoolRoll, type RollChoiceRng } from "./random-tool";
 import { sanitizeForLog } from "./diagnostics";
 import { TURN_OUTPUT_PLACEHOLDER } from "./workspace";
 
@@ -15,19 +16,23 @@ import { TURN_OUTPUT_PLACEHOLDER } from "./workspace";
  * 1. 服务端预注入全部上下文（pi-prompt.ts），模型禁止读文件
  * 2. pi 单进程执行，模型并行写 3 个产物：output.md / interaction.json /
  *    state-update.md（状态变更合并单文件）
- * 3. 服务端后处理：解析合并 state-update → 写 done.json（磁盘权威不变，
- *    由 Web 侧而非模型写入）→ orchestrator 走既有的校验/提交/回滚链路
+ * 3. 服务端后处理：解析合并 state-update → 随机判定申报落账 → 写 done.json
+ *    （磁盘权威不变，由 Web 侧而非模型写入）→ orchestrator 走既有的校验/提交/回滚链路
  *
  * 可靠性装甲（实测 1/6 概率 qwen"口述不写盘"）：output.md 缺失时自动重试
  * （PI_MAX_ATTEMENTS，默认 2，上限 3）。重试在同一快照窗口内，无半成品风险
  * （pi 未写任何文件或只写了部分文件，后续整体回滚/覆盖语义不受影响）。
  *
- * 随机判定（roll-choice bash 工具）本分支不进入 pi 回合路径：pi prompt 禁用
- * bash 换取工具调用可靠性，判定以叙事化方式处理；init 路径（claude CLI）保留。
+ * 随机判定（roll-choice，Issue 5）：pi 禁 bash，无法调 roll-choice CLI；
+ * 等价物为预掷随机数池——服务端 crypto 预生成池注入 prompt，模型按序消耗
+ * 并在 state-update.md 申报，服务端用自持样本重算权威结果落账审计日志
+ * （random-tool.ts recordPoolRoll）。信任等级与 claude 路径对齐。
  */
 
 const DEFAULT_PI_PATH = "pi";
 const SIGKILL_GRACE_MS = 5_000;
+/** 每回合预掷样本数（超时叙事权衡兜底，池在 runTurn 内跨重试固定） */
+const ROLL_POOL_SIZE = 6;
 
 /** 从 process.env 传递给 pi 的白名单（models.json 已含密钥，不传 token） */
 const PI_ENV_WHITELIST = ["PATH", "HOME", "NODE_ENV", "TMPDIR"];
@@ -78,16 +83,24 @@ function killChildGradual(child?: { kill(sig: string): void }): () => void {
 export class PiRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly piPath: string;
+  private readonly rollRng?: RollChoiceRng;
 
-  constructor(opts?: { spawnFn?: SpawnFn; piPath?: string }) {
+  constructor(opts?: { spawnFn?: SpawnFn; piPath?: string; rollRng?: RollChoiceRng }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.piPath = opts?.piPath ?? process.env.PI_PATH?.trim() ?? DEFAULT_PI_PATH;
+    this.rollRng = opts?.rollRng;
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     req.signal.throwIfAborted();
     await ensurePiConfig();
-    const userPrompt = await buildTurnUserPrompt(req.workspaceDir, req.storyId, req.playerInput);
+    const rollPool = generateRollPool(ROLL_POOL_SIZE, this.rollRng);
+    const userPrompt = await buildTurnUserPrompt(
+      req.workspaceDir,
+      req.storyId,
+      req.playerInput,
+      rollPool,
+    );
 
     const args = [
       "-p",
@@ -152,17 +165,20 @@ export class PiRunner implements AgentRunner {
         continue;
       }
 
-      // 成功：合并状态更新（降级不致命）→ 服务端写 done.json
+      // 成功：合并状态更新 + 落账随机判定（均降级不致命）→ 服务端写 done.json
       const mergeDiags: string[] = [];
+      let rolls: RollDeclaration[] = [];
       try {
         const raw = await fs.readFile(path.join(req.workspaceDir, "turn", "state-update.md"), "utf8");
         const parsed = parseStateUpdate(raw);
+        rolls = parsed.rolls;
         mergeDiags.push(...parsed.problems);
         const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
         mergeDiags.push(...applied.errors);
       } catch {
         mergeDiags.push("state-update.md missing or unparseable; skipped (degraded)");
       }
+      mergeDiags.push(...(await recordRollDeclarations(req, rollPool, rolls)));
       await writeDoneMarker(req.workspaceDir);
       return {
         success: true,
@@ -176,4 +192,46 @@ export class PiRunner implements AgentRunner {
       detail: sanitizeForLog(diagnostics.join("\n---\n")).slice(0, 4000),
     };
   }
+}
+
+/**
+ * 落账随机数池消耗申报。严格按 R1,R2,… 顺序核对：乱序条目跳过且不消耗
+ * 号位（防挑号——想用 R3 必须先申报消耗 R1/R2，且各自独立落账审计）；
+ * 顺序正确但无法落账的（超池/校验失败）视为已消耗，只记诊断 note。
+ * 单条失败一律降级，不影响回合成败。
+ */
+async function recordRollDeclarations(
+  req: TurnRequest,
+  rollPool: number[],
+  rolls: RollDeclaration[],
+): Promise<string[]> {
+  const notes: string[] = [];
+  let expected = 1;
+  for (const decl of rolls) {
+    if (decl.index !== expected) {
+      notes.push(`roll skipped (out of order): R${decl.index}, expected R${expected}`);
+      continue;
+    }
+    expected++;
+    if (decl.index > rollPool.length) {
+      notes.push(`roll skipped (pool exhausted): R${decl.index}`);
+      continue;
+    }
+    try {
+      const { result, mismatch } = await recordPoolRoll({
+        storyId: req.storyId,
+        workspaceDir: req.workspaceDir,
+        rollId: decl.rollId,
+        sample: rollPool[decl.index - 1],
+        candidates: decl.candidates,
+        ...(decl.declaredSelectedId !== undefined ? { declaredSelectedId: decl.declaredSelectedId } : {}),
+      });
+      if (mismatch) {
+        notes.push(`roll ${decl.rollId}: declared ${decl.declaredSelectedId} but authoritative ${result.selectedId}`);
+      }
+    } catch (err) {
+      notes.push(`roll ${decl.rollId} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return notes;
 }

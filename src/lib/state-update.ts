@@ -40,13 +40,28 @@ export interface StateUpdateSection {
   ops: StateUpdateOp[];
 }
 
+/** 随机数池消耗申报（=== RANDOM === 段内一行一次判定） */
+export interface RollDeclaration {
+  /** R 编号（1 起，服务端按序号回查池样本） */
+  index: number;
+  rollId: string;
+  candidates: Array<{ id: string; weight: number }>;
+  /** 模型申报的判定结果（服务端重算核对用） */
+  declaredSelectedId?: string;
+}
+
 export interface ParseStateUpdateResult {
   sections: StateUpdateSection[];
+  /** 随机数池消耗申报（乱序/超池的过滤在 pi-runner 结合池实例做） */
+  rolls: RollDeclaration[];
   /** 非致命问题（未知文件、无法解析的操作行），供诊断日志 */
   problems: string[];
 }
 
 const FILE_HEADER_RE = /^===\s*FILE:\s*(\S+)\s*===$/;
+const RANDOM_HEADER_RE = /^===\s*RANDOM\s*===$/;
+/** R1: rollId=lockpick candidates=success:25,fail:75 → success */
+const ROLL_LINE_RE = /^R(\d+):\s*rollId=(\S+)\s+candidates=(\S+)(?:\s*→\s*(\S+))?$/;
 
 /** 校验 state-update 目标文件是否在白名单内（相对路径，actors/ 只允许一层 .md） */
 export function isAllowedStateFile(file: string): boolean {
@@ -61,16 +76,28 @@ export function isAllowedStateFile(file: string): boolean {
 /**
  * 解析 state-update.md 原文。宽松容错：不认识的行忽略并记 problems，
  * 保证模型输出小幅抖动不至于整回合失败。
+ *
+ * === RANDOM === 是申报段不是文件段：声明行进 rolls，不参与
+ * applyStateUpdates；必须显式识别，否则申报行会被当作上一段的
+ * APPEND 续行混入状态文件。
  */
 export function parseStateUpdate(raw: string): ParseStateUpdateResult {
   const sections: StateUpdateSection[] = [];
+  const rolls: RollDeclaration[] = [];
   const problems: string[] = [];
   let current: StateUpdateSection | null = null;
+  let inRandom = false;
 
   for (const rawLine of raw.split("\n")) {
     const line = rawLine.trim();
+    if (RANDOM_HEADER_RE.test(line)) {
+      inRandom = true;
+      current = null;
+      continue;
+    }
     const header = line.match(FILE_HEADER_RE);
     if (header) {
+      inRandom = false;
       const file = header[1];
       if (!isAllowedStateFile(file)) {
         problems.push(`file not allowed: ${file}`);
@@ -79,6 +106,13 @@ export function parseStateUpdate(raw: string): ParseStateUpdateResult {
       }
       current = { file, ops: [] };
       sections.push(current);
+      continue;
+    }
+    if (inRandom) {
+      if (line === "") continue;
+      const decl = parseRollLine(line);
+      if (decl) rolls.push(decl);
+      else problems.push(`unparseable roll line: ${line.slice(0, 60)}`);
       continue;
     }
     if (!current) continue; // 段外内容忽略（含文件头说明文字）
@@ -106,7 +140,32 @@ export function parseStateUpdate(raw: string): ParseStateUpdateResult {
       last.text += `\n${line}`;
     }
   }
-  return { sections, problems };
+  return { sections, rolls, problems };
+}
+
+function parseRollLine(line: string): RollDeclaration | null {
+  const m = line.match(ROLL_LINE_RE);
+  if (!m) return null;
+  const index = Number(m[1]);
+  if (!Number.isInteger(index) || index < 1) return null;
+
+  const candidates: Array<{ id: string; weight: number }> = [];
+  for (const pair of m[3].split(",")) {
+    const sep = pair.indexOf(":");
+    if (sep <= 0) return null;
+    const id = pair.slice(0, sep).trim();
+    const weight = Number(pair.slice(sep + 1));
+    if (!id || !Number.isFinite(weight) || weight <= 0) return null;
+    candidates.push({ id, weight });
+  }
+  if (candidates.length === 0) return null;
+
+  return {
+    index,
+    rollId: m[2],
+    candidates,
+    ...(m[4] !== undefined ? { declaredSelectedId: m[4] } : {}),
+  };
 }
 
 export interface ApplyStateUpdateResult {

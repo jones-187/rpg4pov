@@ -14,7 +14,7 @@
 
 ## Consequences
 
-- **随机判定（roll-choice）暂不进入 pi 回合路径**：pi prompt 禁 bash 换取工具调用可靠性，判定以叙事化方式处理；init 路径保留。恢复需为 pi 设计非 bash 的判定通道。
+- **随机判定经预掷随机数池进入 pi 回合路径**（初版"暂不进入"已被推翻——随机判定是产品红线，不得缺席任何 turn 路径）：pi prompt 禁 bash（工具调用可靠性），agent 无法调 roll-choice CLI；等价通道为服务端 crypto 预生成 6 个 `[0,1)` 样本注入 prompt 末尾，模型按序消耗做 Roll Choice，在 state-update.md `=== RANDOM ===` 段申报，服务端用自持样本**重算权威结果**按同形状落账 random-rolls.jsonl（`random-tool.ts recordPoolRoll`），orchestrator 泄密守卫零改动继续生效。信任模型与 claude 路径对齐：样本真随机（服务端 crypto）、候选权重由 agent 自定（claude 路径同样如此）、服从性靠 prompt 约束；服务端额外多一层申报不一致（mismatch）诊断信号。池在回合内跨重试固定（防故意失败刷点）；消耗严格按 R1,R2,… 顺序核对（防挑号）。
 - **qwen 工具调用可靠性装甲**：实测 1/6 概率"口述不写盘"（输出文件缺失），PiRunner 自动重试一次（`PI_MAX_ATTEMPTS`，默认 2）。
 - **权限治理换轨**（见 claude-code-runner 注释）：claude CLI 2.1.140 + 网关环境下 settings 路径规则对 Write 调用完全不匹配，init 改 `--tools=Read,Write` + auto；orchestrator 新增受保护路径基线守卫（story.md / turn/input.md 与既有 history 守卫同级，fail-closed）。
 - 模型锁定 qwen-fp8（项目约束）；pi 锁 0.73.1（Dockerfile）。

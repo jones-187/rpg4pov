@@ -126,6 +126,10 @@ _Avoid_: 玩家随机记录、调试面板、可见骰点
 Issue 6 引入。把 Random Tool 库函数（`rollChoice`）包装成 CLI 子进程可调用的接口，供 Claude Code Runner 经 Bash 工具调用。输入为 stdin JSON，输出为 stdout JSON（`RollChoiceResult`）。复用 `random-tool.ts` 领域逻辑，不重复实现。是 Agent Runner（子进程）与 Random Tool（库函数）之间的桥接层。
 _Avoid_: MCP server、随机工具重实现、agent 内置随机
 
+### Pre-rolled Random Pool（预掷随机数池）
+Pi Runner 路径的随机判定通道（性能优化分支）：pi 禁 bash，无法调用 Random Tool CLI Wrapper；改为服务端在回合前 crypto 预生成一池 `[0,1)` 样本注入 prompt 末尾，模型按序消耗做 Roll Choice，在 State Update Bundle 的 `=== RANDOM ===` 申报段报告消耗，服务端用自持样本重算权威 Binding Random Outcome 并落账 Random Log（`random-tool.ts recordPoolRoll`）。池在回合内跨重试固定（防故意失败刷点）；消耗严格按 R1,R2,… 顺序核对（防挑号）。
+_Avoid_: 给 pi 恢复 bash、模型自造随机数、把池值或申报内容写进玩家可见输出
+
 ## Agent 相关
 
 ### Agent Runtime Adapter（Agent 运行时适配器）
@@ -146,11 +150,11 @@ _Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.
 _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
 
 ### Pi Runner（pi 运行器）
-性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
+性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。随机判定经 Pre-rolled Random Pool 由服务端权威落账。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
 _Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash 工具
 
 ### State Update Bundle（状态变更单）
-`turn/state-update.md`：Pi Runner 回合中全部状态文件变更的合并载体（每段 `=== FILE: 文件名 ===` + APPEND/REPLACE 行）。服务端解析并应用到白名单内文件（world/player/actors/adjustments/tendencies），白名单外或解析失败降级不致命。是回合内部中间产物，不是故事状态本身。
+`turn/state-update.md`：Pi Runner 回合中全部状态文件变更的合并载体（每段 `=== FILE: 文件名 ===` + APPEND/REPLACE 行）。服务端解析并应用到白名单内文件（world/player/actors/adjustments/tendencies），白名单外或解析失败降级不致命。另有 `=== RANDOM ===` 申报段承载 Pre-rolled Random Pool 的消耗申报（不是文件段，由服务端核对落账）。是回合内部中间产物，不是故事状态本身。
 _Avoid_: 让模型逐文件多次写盘、把 Bundle 当作新的故事状态源
 
 ### Runner 切换（Runner Selection）
@@ -224,7 +228,7 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 - 一个成功提交的 **Random Judgment** 应产生一条对应的 **Random Log**。
 - **Player-visible Output** 可以呈现 **Binding Random Outcome** 的可见后果，但不能直接展示 **Random Log**。
 - 失败并回滚的 **Story Turn** 不保留本回合产生的 **Random Log**；只有成功回合的随机判定成为故事状态的一部分。
-- **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数。两者产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
+- **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数；**Pi Runner**（Story Turn）经 **Pre-rolled Random Pool** 完成同样的 Roll Choice，**Random Log** 由服务端权威重算落账——三条路径产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
 - **Runner 切换** 决定 **Turn Orchestrator** 持有哪个 **Agent Runner** 实例，但 **Turn Orchestrator** 的生命周期编排逻辑（锁、快照、磁盘权威、回滚）不随 runner 变化。
 - **Story Initialization** 以 **Runner Task** `init` 经同一 **Turn Orchestrator** 执行；用户设定中的角色卡等明确内容是 canon，agent 只能补全不能改写。
 - 成功的 **Story Initialization** 产生一条 **Opening Entry** 并写入 **Initialized Marker**；两者在同一提交批次内，任一失败则整体回滚。

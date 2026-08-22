@@ -2,7 +2,7 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**性能优化分支（dev/perf）：Story Turn 已迁移到 pi coding agent——服务端预注入上下文、模型并行写三产物（output / interaction / state-update 单文件）、服务端解析合并并写 done 标记；Story Initialization 保留 claude CLI（延迟不敏感的开放创作）。端到端实测（WSL Docker + NewAPI + qwen-fp8）：init ~2 分钟、回合冷 ~61s / 暖 ~43s（迁移前 ~3 分钟）。决策记录与被否决备选见 `docs/adr/0001-pi-turn-runner.md`**。
+当前仓库状态：**性能优化分支（dev/perf）：Story Turn 已迁移到 pi coding agent——服务端预注入上下文、模型并行写三产物（output / interaction / state-update 单文件）、服务端解析合并并写 done 标记；Story Initialization 保留 claude CLI（延迟不敏感的开放创作）。端到端实测（WSL Docker + NewAPI + qwen-fp8）：init ~2 分钟、回合冷 ~61s / 暖 ~43s（迁移前 ~3 分钟）。随机判定经预掷随机数池进入 pi 回合路径：服务端 crypto 预生成样本注入 prompt、模型按序消耗申报、服务端权威重算落账审计日志（CONTEXT.md「Pre-rolled Random Pool」）。决策记录与被否决备选见 `docs/adr/0001-pi-turn-runner.md`**。
 此前 Issue 7-14 已实现并验收（含 Issue 13 NPC 情感连续性、Issue 14 committed history 隔离）；性能优化分支同时关闭了 Issue 14 遗留的"权限层 Docker 复验"：实测 claude CLI 2.1.140 + 网关环境下 settings 路径规则对 Write 完全不匹配，init 改 `--tools=Read,Write` + auto，受保护文件（turns/**、story.md、turn/input.md）由 orchestrator 基线比对守卫 fail-closed 保护。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，`AGENT_RUNNER=claude` 时按 task 分发 runner（turn → Pi Runner、init → Claude Code Runner；默认 Fake Agent），返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚、受保护路径基线守卫）、输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）；committed 玩家历史 exclusively 由 orchestrator 提交——agent 执行期间对 `turns/history.jsonl` 的任何改动都会被逐字比对拦截并整轮回滚。
@@ -83,12 +83,12 @@ docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
   tendencies.md         # Inferred Tendencies 推测倾向（Issue 9.5；初始为空）
   actors/.gitkeep       # 占位（NPC 角色卡目录）
   logs/.gitkeep         # 内部日志目录
-  logs/random-rolls.jsonl # 随机判定日志（成功回合追加；不对用户可见）
+  logs/random-rolls.jsonl # 随机判定日志（成功回合追加；claude 路径 agent 经 CLI 写入，pi 路径由 Web 侧权威落账；不对用户可见）
   logs/turn-errors.log  # 回合失败诊断日志（内部）
   turn/input.md         # 本回合主角输入（"继续"系统命令时为系统指令文本）
   turn/output.md        # 本回合固定主角可见输出（Web 唯一返回源）
   turn/interaction.json # 回合交互状态：continue|decision + 0-4 条建议（Issue 10；Web 只返回净化版本）
-  turn/state-update.md  # 状态变更单（pi 回合内部中间产物：=== FILE: x === + APPEND/REPLACE，服务端解析合并后落盘）
+  turn/state-update.md  # 状态变更单（pi 回合内部中间产物：=== FILE: x === + APPEND/REPLACE 服务端解析合并落盘；=== RANDOM === 段为随机数池消耗申报，服务端核对后落审计日志）
   turn/done.json        # 运行成功标记（pi 路径由 Web 侧在解析合并后写入，init 路径由 agent 写入；orchestrator 以其磁盘存在性判定成败，回合前清理）
   turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5；含 opening 与 turn 两类条目）
 ```
