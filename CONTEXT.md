@@ -151,7 +151,10 @@ _Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.
 _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
 
 ### Pi Runner（pi 运行器）
-性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件，工具面收窄至 write），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。随机判定经 Pre-rolled Random Pool 由服务端权威落账。预注入顺序按变化频率升序（稳定段前置，吃网关跨请求前缀缓存）；三产物落盘即早退（看门狗 SIGTERM，跳过收尾往返）；角色卡超预算时注入瘦身指令防长局 prefill 漂移。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置一次自动重试装甲对抗模型的"口述不写盘"失效模式。模型锁定 qwen-fp8。
+性能优化分支（2026-08）引入的 Story Turn 执行 runner，基于 pi coding agent。与 agent 自主读写的模式分叉：服务端**预注入**全部 workspace 上下文（模型禁止读文件，工具面收窄至 write），模型一次性并行写三个产物（主角可见输出、交互状态、State Update Bundle），服务端解析合并状态并写 Done Marker。随机判定经 Pre-rolled Random Pool 由服务端权威落账。预注入顺序按变化频率升序（稳定段前置，吃网关跨请求前缀缓存）；三产物落盘即早退（看门狗 SIGTERM，跳过收尾往返）；角色卡超预算时注入瘦身指令防长局 prefill 漂移。每回合冷启动、无会话记忆（磁盘是唯一真相）；内置自动重试装甲对抗模型的"口述不写盘"失效模式，且成功路径有 mtime 基线新鲜度门——残留的上一回合产物不得被当成本回合提交（实测修复）。`--mode json` 事件流驱动叙事先行预览（见 Player-visible Output 词条例外）。模型锁定 qwen-fp8。
+
+### Turn Progress Registry（回合进度注册表）
+回合进行时的进程内单例（挂 globalThis——Next 构建会把模块复制进多个路由包，模块级 Map 会分裂成两份），PiRunner 发布"叙事/选项组合完成"相位，turn-preview 轮询接口读取，Orchestrator 回合终局清空。attempt 单调令牌防御迟到的异步发布（泄密守卫读盘跨越重试/终局时落地会推翻撤回或形成僵尸预览）；发布前的泄密守卫与提交校验同源。预览永远不是权威。
 _Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash/read 工具、qwen 思考档位调参（网关无视且 low/off 诱发口述失效）
 
 ### State Update Bundle（状态变更单）

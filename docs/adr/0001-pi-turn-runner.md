@@ -22,5 +22,11 @@
   - **`--tools write` 工具面收窄**：读/bash/edit 从模型工具列表移除，prompt 措辞约束升级为结构性不存在。
   - **角色卡预算**（`PI_ACTOR_BUDGET_BYTES`，默认 6KB）：超预算卡在 prompt 注入 REPLACE 修剪指令（合并重复、删过时证据，保 Emotional Core / Relationship State）——实测 actors 第 3 回合即可达 ~19.6KB，长局 prefill 漂移是回合时延劣化主因。服务端只发指令不硬截断，故事真相取舍留给模型。
   - **qwen 思考档位实测不可用**：`--thinking low` 直接诱发"口述不写盘"（与 `:off` 同病），`minimal` 被网关无视（输出 token 不降反升）——与 budget_tokens / no_think 一致，此路不通；解码成本中思考占比不可控是 pi+qwen+该网关组合的结构地板。
+- **三轮优化（2026-08-23 全链路时间解剖驱动：init 248s / turn 102s 各做了一次逐事件实测拆解）**：
+  - **时间地图结论**：turn 的用户可见内容（叙事+选项）在组合流的 86% 处就绪，其后 12% 是用户永远不读的 state-update 记账；init 的开场视窗在 79% 处才落盘、done.json 之后还有 20% 纯自查返工、开头 3% 是骨架探索往返。优化目标从"压缩服务器忙碌时间"转向"把可延迟的藏进用户阅读窗口、把结构性浪费直接消灭"。
+  - **叙事先行（P1）**：pi spawn 切 `--mode json`，事件流经 SpawnOpts.onStdoutLine 旁路（不影响 stdout 聚合）；`toolcall_end(write output.md)` 携带参数原文，先跑与权威路径同源的泄密守卫后经 turn-progress 注册表（挂 globalThis——Next 构建会把模块复制进多个路由包）+ `GET turn-preview` 轮询接口推给前端。实测叙事在全程 84% 处可读；回合失败/重试时前端撤回（attempt 单调令牌防御迟到的异步发布推翻撤回/形成僵尸预览）。早退看门狗保持 mtime 版不动，事件流纯旁路。
+  - **init 三刀（P2）**：① 骨架占位文件预注入 prompt（Read×4+find+Glob 探索段实测 7s 归零，init 工具轮次 40→21）；② 概念文件批量落盘指令（效果有限——qwen 经 claude 通道单轮多 Write 不稳定，output+interaction 双写可见，概念文件仍偏单写）；③ done.json 契约改为永远最后一步 + 看门狗落盘即杀（`CLAUDE_EARLY_EXIT`，mtime 基线防旧文件误杀，杀后非零退出码放行，orchestrator 校验链兜底）——post-done 尾巴实测 50s→~0。整体 init 248s→173s（同网关对照 183s）。
+  - **感知层（P3）**：乐观回显（提交即显示"你"的输入）+ 等待期预打字排队（输入框解禁，上一回合落定自动发送，把玩家 think/打字时间藏进生成时间；清空时机固定在提交瞬间，失败回填仅输入框为空时——不吞 pending 期间的新草稿）+ 打字机渐显（预览叙事逐字浮现，点击跳过）。
+  - **E2E 实测暴露并修复的生产级隐患**：(a) 旧产物蒙混提交——口述失效模式（pi 退出码 0 不写盘）下 turn/ 残留上一回合产物，无新鲜度校验会把旧 output 一字不差重复提交（实测复现），成功路径加 mtime 基线新鲜度门 + 旧 state-update 不重放；(b) json 事件流每行携带累积 partial，stdout 无上限累积撑爆 V8 字符串上限炸掉 data 回调——改 64KB 尾部环形缓冲 + 旁路 try/catch；(c) turn-progress 模块被 Next 构建分裂成两份 Map——挂 globalThis。
 - **权限治理换轨**（见 claude-code-runner 注释）：claude CLI 2.1.140 + 网关环境下 settings 路径规则对 Write 调用完全不匹配，init 改 `--tools=Read,Write` + auto；orchestrator 新增受保护路径基线守卫（story.md / turn/input.md 与既有 history 守卫同级，fail-closed）。
 - 模型锁定 qwen-fp8（项目约束）；pi 锁 0.73.1（Dockerfile）。
