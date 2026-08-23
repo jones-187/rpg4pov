@@ -1,0 +1,9 @@
+# 启用统一 Pi Runner（init/turn 共用同一个 PiRunner）的 compose 覆盖文件。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
+services:
+  rpg4pov:
+    env_file:
+      - .env
+    environment:
+      - AGENT_RUNNER=pi
+      - TURN_TIMEOUT_MS=300000

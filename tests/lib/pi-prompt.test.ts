@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { buildTurnUserPrompt, PI_TURN_SYSTEM_PROMPT, resolveHistoryLimit, resolveActorBudgetBytes } from "@/lib/pi-prompt";
+import {
+  buildInitUserPrompt,
+  buildTurnUserPrompt,
+  PI_INIT_SYSTEM_PROMPT,
+  PI_TURN_SYSTEM_PROMPT,
+  resolveHistoryLimit,
+  resolveActorBudgetBytes,
+} from "@/lib/pi-prompt";
 import { buildPiModelsJson, ensurePiConfig, resolvePiAgentDir } from "@/lib/pi-config";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
@@ -29,6 +36,56 @@ describe("PI_TURN_SYSTEM_PROMPT", () => {
     expect(PI_TURN_SYSTEM_PROMPT).toContain("R1: rollId=lockpick");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("必须服从");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止自造随机数");
+  });
+});
+
+describe("PI_INIT_SYSTEM_PROMPT", () => {
+  it("保留初始化产品契约与三产物协议", () => {
+    for (const marker of [
+      "canon",
+      "3-5",
+      "Protagonist Core",
+      "Player Agency",
+      "Emotional Core",
+      "Relationship State",
+      "coreNeed",
+      "coreFear",
+      "surfaceRelationship",
+      "recentEvidence",
+      "Emotionally Salient Memories",
+      "event、meaning、impact",
+      "Current Intent",
+      "emotionalTrigger",
+      "emotionalConflict",
+      "restraint",
+      "# 主角视窗",
+      "不要预写固定剧情",
+      "输出隔离",
+      "turn/output.md",
+      "turn/interaction.json",
+      "turn/state-update.md",
+      "=== FILE: actors/name.md ===",
+      "禁止写 story.md",
+      "不要写 done.json",
+    ]) {
+      expect(PI_INIT_SYSTEM_PROMPT).toContain(marker);
+    }
+    expect(PI_INIT_SYSTEM_PROMPT).not.toContain("随机数池");
+  });
+
+  it("用户 canon 与骨架完整注入，初始化不带随机池", async () => {
+    const meta = await createStory();
+    const prompt = await buildInitUserPrompt(
+      resolveWorkspaceDir(meta.storyId),
+      "雾中灯塔，主角是守塔学徒，使用第三人称限知视角",
+    );
+    expect(prompt).toContain("雾中灯塔，主角是守塔学徒，使用第三人称限知视角");
+    expect(prompt).toContain("=== story.md ===");
+    expect(prompt).toContain("=== world.md ===");
+    expect(prompt).toContain("=== player.md ===");
+    expect(prompt).toContain("=== rules.md ===");
+    expect(prompt).not.toContain("R1=");
+    expect(prompt).not.toContain("=== 随机数池");
   });
 });
 

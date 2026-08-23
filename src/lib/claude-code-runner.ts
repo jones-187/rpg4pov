@@ -1,7 +1,7 @@
-import { spawn as realSpawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, RunnerTask, TurnRequest, TurnResult } from "./agent-runner";
+import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./agent-spawn";
 import { buildPrompt, buildInitPrompt, INIT_SKELETON_FILES } from "./claude-prompt";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
@@ -36,32 +36,10 @@ async function readInitSkeletonContext(workspaceDir: string): Promise<string> {
   return parts.join("\n\n");
 }
 
-/** spawn 函数签名（用于依赖注入测试） */
-export type SpawnFn = (
-  cmd: string,
-  args: string[],
-  opts: SpawnOpts,
-) => Promise<SpawnResult>;
-
-export interface SpawnOpts {
-  cwd: string;
-  env: Record<string, string | undefined>;
-  signal: AbortSignal;
-  /** stdin 内容：runTurn 传完整 prompt，spawn 后立即 child.stdin.end() */
-  stdinData: string;
-  stdio: ["pipe", "pipe", "pipe"];
-  /** 可选：stdout 每收到完整一行时回调（pi --mode json 事件流消费；不影响 stdout 聚合） */
-  onStdoutLine?: (line: string) => void;
-  /** 测试 hack：暴露 ChildProcess 以便 runTurn 在 abort 时 kill（真实 spawn 由 defaultSpawn 挂载） */
-  _child?: { kill(sig: string): void };
-}
-
-export interface SpawnResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  aborted?: boolean;
-}
+// Re-export the neutral seam for existing callers and tests. New runners should
+// import it from agent-spawn directly.
+export { defaultSpawn } from "./agent-spawn";
+export type { SpawnFn, SpawnOpts, SpawnResult } from "./agent-spawn";
 
 /** 从 process.env 传递的白名单 key（禁止全量继承 process.env） */
 const ENV_WHITELIST = [
@@ -300,69 +278,4 @@ function buildEnvWhitelist(): Record<string, string | undefined> {
     env[key] = process.env[key];
   }
   return { ...env, ...RUNNER_FIXED_ENV };
-}
-
-/**
- * 默认 spawn 实现：真实 child_process.spawn + stdin 传递 + 收集 stdout/stderr + 挂 _child。
- * 不负责 kill（kill 策略由 runTurn 经 opts._child 执行）。
- * stdin 内容从 opts.stdinData 读取，spawn 后立即 child.stdin.end() 写入并关闭。
- */
-export function defaultSpawn(
-  cmd: string,
-  args: string[],
-  opts: SpawnOpts,
-): Promise<SpawnResult> {
-  return new Promise((resolve, reject) => {
-    const child = realSpawn(cmd, args, {
-      cwd: opts.cwd,
-      env: opts.env as NodeJS.ProcessEnv,
-      stdio: opts.stdio,
-    }) as ChildProcess;
-
-    // 立即写入 prompt 到 stdin 并关闭，避免 claude CLI 因 stdin 无数据而等待 3s
-    child.stdin?.end(opts.stdinData);
-
-    let stdout = "";
-    let stderr = "";
-    // stdout 只保留尾部环形缓冲：诊断仅取 ~2KB slice，而 pi --mode json 事件流
-    // 每行携带累积 partial，全程可达数百 MB——无上限累积会撑爆 V8 字符串
-    // 上限（RangeError: Invalid string length，实测炸掉整个 data 回调）
-    const STDOUT_TAIL_LIMIT = 64 * 1024;
-    // onStdoutLine 旁路：按行切分转发（保留不完整尾行等下一个 chunk；
-    // 流结束时残余不_flush——jsonl 事件流必然换行结尾，半行无消费价值）
-    let lineBuf = "";
-    child.stdout?.on("data", (chunk) => {
-      const text = chunk.toString();
-      stdout = (stdout + text).slice(-STDOUT_TAIL_LIMIT);
-      if (!opts.onStdoutLine) return;
-      lineBuf += text;
-      const lines = lineBuf.split("\n");
-      lineBuf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.trim() === "") continue;
-        // 预览是旁路：它的 bug 不得炸掉 spawn/诊断主链路
-        try {
-          opts.onStdoutLine(line);
-        } catch {
-          // 静默——权威路径不受影响
-        }
-      }
-    });
-    child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
-
-    child.on("error", (err) => {
-      reject(err);
-    });
-    child.on("close", (code) => {
-      resolve({
-        code,
-        stdout,
-        stderr,
-        aborted: opts.signal.aborted,
-      });
-    });
-
-    // 暴露 child 以便 runTurn 在 abort 时 kill（测试 hack 兼生产用）
-    opts._child = { kill: (sig) => child.kill(sig as any) };
-  });
 }

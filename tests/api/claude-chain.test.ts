@@ -14,7 +14,8 @@ import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-e
 vi.mock("@/lib/runner-selection", async () => {
   const pathMod = await import("node:path");
   const { TurnOrchestrator } = await import("@/lib/turn-orchestrator");
-  const { ClaudeCodeRunner, defaultSpawn } = await import("@/lib/claude-code-runner");
+  const { ClaudeCodeRunner } = await import("@/lib/claude-code-runner");
+  const { defaultSpawn } = await import("@/lib/agent-spawn");
   const FAKE = pathMod.resolve(__dirname, "../fixtures/fake-claude.mjs");
   const wrappedSpawn = (cmd: string, args: string[], opts: unknown) =>
     defaultSpawn("node", [FAKE, ...args], opts as Parameters<typeof defaultSpawn>[2]);

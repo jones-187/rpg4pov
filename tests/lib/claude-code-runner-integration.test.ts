@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ClaudeCodeRunner, defaultSpawn } from "@/lib/claude-code-runner";
-import type { SpawnFn, SpawnOpts } from "@/lib/claude-code-runner";
+import { ClaudeCodeRunner } from "@/lib/claude-code-runner";
+import { defaultSpawn } from "@/lib/agent-spawn";
+import type { SpawnFn, SpawnOpts } from "@/lib/agent-spawn";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 

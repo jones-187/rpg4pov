@@ -154,3 +154,68 @@ export async function buildTurnUserPrompt(
   parts.push("\n按 system 提示执行本回合。");
   return parts.join("\n");
 }
+
+/**
+ * Pi initialization plan. Init receives the user's canon and skeleton up
+ * front, emits three candidate files, and leaves validation/committed writes
+ * to the server.
+ */
+export const PI_INIT_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化 agent，不是编码助手。当前目录是 Story Workspace；所有骨架和用户设定已预注入，禁止读取文件。
+
+## 初始化契约
+- 用户设定是 canon：明确写出的角色、关系、世界、规则、基调和 POV 必须原文保留，只能补全未定义部分。
+- 生成可玩的小场景：有限地点和时间跨度，保留矛盾、秘密、风险或压力；不要预写固定剧情、固定剧本、路线、章节大纲或结局。
+- 正常未指定人数时生成 3-5 个核心 NPC；canon 明确人数时服从 canon。
+- player.md 必须包含 Protagonist Core（narrativeVoice、temperament、emotionalExpression、conflictStyle、relationshipStyle、humorStyle、initiative、moralBoundaries、speechPatterns、avoidExpressions）与 Player Agency 边界。默认第一人称主角限知，明确指定的 POV 以 canon 为准。
+- 每个 actors/*.md 核心 NPC 必须包含四层结构：Emotional Core（coreNeed、coreFear、vulnerability、defensivePattern、approachPattern、retreatPattern）；Relationship State（NPC→protagonist，含 surfaceRelationship、privateMeaning、desiredPosition、perceivedPosition、approachImpulse、avoidanceImpulse、unresolvedQuestion、currentTension、recentEvidence）；Emotionally Salient Memories（每条含 event、meaning、impact）；Current Intent（含 currentEmotion、emotionalTrigger、emotionalConflict、immediateGoal、hiddenIntent、restraint、behaviorStrategy、voice）。稳定情感核心不可为剧情方便改写；初始不得因恋爱标签默认爱、依赖或嫉妒。
+- 开场 output.md 只能写主角可见视窗（输出隔离），首行必须是「# 主角视窗」；不得泄漏 God State、NPC 私有记忆/情感状态、hiddenIntent、内部判断或结构化状态。
+
+## 三个候选产物（必须一次并行 write）
+必须在同一条回复中并发调用 write 工具，且只创建/覆盖以下三个文件：
+1. turn/output.md：开场主角视窗，遵守 POV 和输出隔离，不写 JSON。
+2. turn/interaction.json：仅为 {"mode":"continue"|"decision","suggestions":[...]}；建议 0–4 个，只在真正决策点提供。
+3. turn/state-update.md：完整 Init Workspace Bundle。每个文件都用完整正文，不使用 APPEND/REPLACE：
+=== FILE: world.md ===
+完整正文
+=== FILE: player.md ===
+完整正文
+=== FILE: rules.md ===
+完整正文
+=== FILE: actors/name.md ===
+完整正文
+必须包含 world.md、player.md、rules.md 各一份及至少一张 actors/*.md；只允许 actors 下一层 Markdown 文件。不要在 Bundle 外写任何概念文件。
+
+禁止写 story.md、turns/**、turn/input.md、adjustments.md、tendencies.md 或其他文件；不要写 done.json，服务端会在完整 Bundle 校验并应用后写入。不要把文件内容放在回复正文。三个 write 完成后最终回复只写「初始化完成」。`;
+
+/** 初始化预注入骨架文件；与 Claude 基线保持相同的上下文形状。 */
+export const PI_INIT_SKELETON_FILES = ["story.md", "world.md", "player.md", "rules.md"] as const;
+
+async function readInitSkeletonContext(workspaceDir: string): Promise<string> {
+  const parts: string[] = [];
+  for (const file of PI_INIT_SKELETON_FILES) {
+    let content: string;
+    try {
+      content = (await fs.readFile(path.join(workspaceDir, file), "utf8")).trimEnd();
+    } catch {
+      content = "（不存在）";
+    }
+    parts.push(`=== ${file} ===\n${content}`);
+  }
+  return parts.join("\n\n");
+}
+
+/** Build init user prompt with canon and complete placeholder skeleton. */
+export async function buildInitUserPrompt(workspaceDir: string, setting: string): Promise<string> {
+  const skeleton = await readInitSkeletonContext(workspaceDir);
+  return [
+    "执行故事初始化。以下内容是只读预注入上下文，禁止读取文件。",
+    "",
+    "## 用户设定（canon，优先级最高）",
+    setting,
+    "",
+    "## 初始化骨架文件（完整原文，仅供填充参考）",
+    skeleton,
+    "",
+    "按 system 提示生成三个候选产物；初始化不调用随机工具。",
+  ].join("\n");
+}

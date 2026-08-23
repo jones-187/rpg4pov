@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { PiRunner } from "@/lib/pi-runner";
-import type { SpawnFn, SpawnOpts } from "@/lib/claude-code-runner";
+import type { SpawnFn, SpawnOpts } from "@/lib/agent-spawn";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
 import { readTurnProgress, clearTurnProgress } from "@/lib/turn-progress";
@@ -41,6 +41,17 @@ const STATE_UPDATE_MD = [
   "REPLACE: （占位：场景、地点、时间与隐藏事实。后续初始化 agent 填充。）→ 雪夜客栈",
 ].join("\n");
 
+const INIT_BUNDLE = [
+  "=== FILE: world.md ===",
+  "# 世界设定\n\n雨夜的废弃灯塔，雾潮会在黎明前上涨。",
+  "=== FILE: player.md ===",
+  "# 主角\n\n## 用户设定（canon）\n雾中的守塔学徒。\n\n## Protagonist Core\nnarrativeVoice: 第一人称限知。\n\n## Player Agency\n重大决定交还玩家。",
+  "=== FILE: rules.md ===",
+  "# 规则\n\n风险由随机工具判定，故事不预写固定路线。",
+  "=== FILE: actors/keeper.md ===",
+  "# 守塔人\n\n## Emotional Core\ncoreNeed: 有人留下。\ncoreFear: 灯火熄灭。\n\n## Relationship State: 主角\nsurfaceRelationship: 新来的学徒。\n\n## Emotionally Salient Memories\nevent: 上一任守塔人失踪。\nmeaning: 灯不能无人照看。\nimpact: 他不再轻信离开的人。\n\n## Current Intent\ncurrentEmotion: 警觉。\nimmediateGoal: 试探学徒。\nhiddenIntent: 确认学徒是否可靠。\nrestraint: 不愿暴露秘密。\nvoice: 短句。",
+].join("\n");
+
 const ENV_KEYS = ["PI_HOME", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"] as const;
 let savedEnv: Record<string, string | undefined>;
 let piHome: string;
@@ -70,6 +81,113 @@ function turnRequest(storyId: string, workspaceDir: string) {
 }
 
 describe("PiRunner", () => {
+  it("task=init uses the init plan, applies a complete bundle, and writes done server-side", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeSpawn([
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": INIT_BUNDLE,
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "雾中的废弃灯塔，主角是守塔学徒",
+      task: "init",
+    });
+
+    expect(result.success).toBe(true);
+    const prompt = calls[0].args[calls[0].args.length - 1];
+    expect(prompt).toContain("初始化");
+    expect(prompt).toContain("雾中的废弃灯塔");
+    expect(prompt).toContain("=== world.md ===");
+    expect(prompt).not.toContain("随机数池");
+    await expect(fs.readFile(path.join(dir, "world.md"), "utf8")).resolves.toContain("废弃灯塔");
+    await expect(fs.readFile(path.join(dir, "actors/keeper.md"), "utf8")).resolves.toContain("Emotional Core");
+    await expect(fs.readFile(path.join(dir, "turn/done.json"), "utf8")).resolves.toContain("success");
+  });
+
+  it("task=init retries an invalid bundle without partially applying conceptual files", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const invalid = INIT_BUNDLE.replace("=== FILE: actors/keeper.md ===", "=== FILE: story.md ===");
+    const { spawn, calls } = makeSpawn([
+      { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON, "turn/state-update.md": invalid },
+      { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON, "turn/state-update.md": INIT_BUNDLE },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    await expect(fs.readFile(path.join(dir, "world.md"), "utf8")).resolves.toContain("废弃灯塔");
+  });
+
+  it("task=init exhausts attempts without writing done or partial conceptual files", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const invalid = INIT_BUNDLE.replace("=== FILE: actors/keeper.md ===", "=== FILE: story.md ===");
+    const { spawn, calls } = makeSpawn([
+      { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON, "turn/state-update.md": invalid },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no init artifact/bundle");
+    expect(calls).toHaveLength(2);
+    await expect(fs.access(path.join(dir, "turn/done.json"))).rejects.toThrow();
+    await expect(fs.readFile(path.join(dir, "world.md"), "utf8")).resolves.toContain("占位");
+  });
+
+  it("task=init does not retry after a valid bundle hits a filesystem apply error", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    // Make the second conceptual target an incompatible filesystem entry so
+    // world.md is renamed before player.md fails. Orchestrator rollback owns
+    // recovery; PiRunner must not run another attempt on this workspace.
+    await fs.rm(path.join(dir, "player.md"));
+    await fs.mkdir(path.join(dir, "player.md"));
+    const { spawn, calls } = makeSpawn([
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": INIT_BUNDLE,
+      },
+      {
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": INIT_BUNDLE,
+      },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("pi init bundle apply failed");
+    expect(result.detail).toContain("init bundle apply failed");
+    expect(calls).toHaveLength(1);
+    await expect(fs.access(path.join(dir, "turn/done.json"))).rejects.toThrow();
+  });
+
   it("成功路径：合并 state-update、服务端写 done.json、只 spawn 一次", async () => {
     const meta = await createStory();
     await appendTurnHistory(meta.storyId, {

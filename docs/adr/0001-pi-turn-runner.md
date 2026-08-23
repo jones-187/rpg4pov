@@ -1,6 +1,6 @@
 # 回合执行从 claude CLI agent 循环迁移到 pi（预注入上下文 + 合并写盘）
 
-2026-08 性能优化分支：Story Turn（热路径，目标 ≤60s）改由 pi coding agent 执行——服务端预注入全部 workspace 上下文（模型禁读文件）、模型一次性并行写 3 个产物（output.md / interaction.json / state-update.md 状态变更单文件）、服务端解析合并并写 done.json；Story Initialization（每故事一次、无延迟压力）保留 claude CLI agentic 路径。runner 经 `TaskDispatchRunner` 按 `req.task` 分发（`AGENT_RUNNER=claude` 时生效），锁/快照/回滚/输出契约链路不变。
+2026-08 性能优化分支：Story Turn（热路径，目标 ≤60s）与 Story Initialization 均可由 Pi Runner 执行——服务端按 `req.task` 选择 prompt；turn 预注入全部 workspace 上下文并写增量 State Update Bundle，init 预注入用户 canon/骨架并写完整 Init Workspace Bundle，服务端校验应用后写 done.json。`AGENT_RUNNER=pi` 使用单一 PiRunner；`AGENT_RUNNER=claude` 仍经 `TaskDispatchRunner` 保留 turn→Pi、init→Claude 的 A/B 基线。锁/快照/回滚/输出契约链路不变。
 
 ## 为什么（实测数字，2026-08-22，NewAPI 网关 + qwen-fp8）
 

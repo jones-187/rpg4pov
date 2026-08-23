@@ -21,6 +21,19 @@ function req(task?: "turn" | "init"): TurnRequest {
 }
 
 describe("resolveRunner task 分发（性能优化分支）", () => {
+  it("AGENT_RUNNER=pi：init 与 turn 都由同一个 PiRunner 执行", async () => {
+    process.env.AGENT_RUNNER = "pi";
+    const piSpy = vi.spyOn(PiRunner.prototype, "runTurn").mockResolvedValue({ success: true });
+
+    const runner = resolveRunner();
+    expect(runner).toBeInstanceOf(PiRunner);
+    await runner.runTurn(req("turn"));
+    await runner.runTurn(req("init"));
+
+    expect(piSpy).toHaveBeenCalledTimes(2);
+    expect(piSpy.mock.instances[0]).toBe(piSpy.mock.instances[1]);
+  });
+
   it("AGENT_RUNNER=claude：turn 走 PiRunner，init 走 ClaudeCodeRunner", async () => {
     process.env.AGENT_RUNNER = "claude";
     const piSpy = vi.spyOn(PiRunner.prototype, "runTurn").mockResolvedValue({ success: true });

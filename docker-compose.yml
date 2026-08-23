@@ -9,8 +9,8 @@ services:
       - rpg4pov-data:/app/data
     restart: unless-stopped
     # 默认 AGENT_RUNNER 不设（route.ts 默认 fake）。
-    # 启用真实 claude：用 docker-compose -f docker-compose.yml -f docker-compose.claude.yml up
-    # 或在此处 environment 加 AGENT_RUNNER=claude + ANTHROPIC_API_KEY。
+    # Pi 候选路径：用 docker-compose -f docker-compose.yml -f docker-compose.pi.yml up
+    # Claude A/B 基线：用 docker-compose -f docker-compose.yml -f docker-compose.claude.yml up
 
 volumes:
   rpg4pov-data:

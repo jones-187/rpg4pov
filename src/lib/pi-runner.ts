@@ -1,10 +1,16 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
-import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./claude-code-runner";
+import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./agent-spawn";
 import { ensurePiConfig, resolvePiModel } from "./pi-config";
-import { PI_TURN_SYSTEM_PROMPT, buildTurnUserPrompt } from "./pi-prompt";
+import {
+  PI_INIT_SYSTEM_PROMPT,
+  PI_TURN_SYSTEM_PROMPT,
+  buildInitUserPrompt,
+  buildTurnUserPrompt,
+} from "./pi-prompt";
 import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
+import { applyInitWorkspaceBundle, parseInitWorkspaceBundle } from "./init-bundle";
 import { generateRollPool, recordPoolRoll, type RollChoiceRng } from "./random-tool";
 import { sanitizeForLog } from "./diagnostics";
 import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
@@ -15,7 +21,7 @@ import { beginTurnAttempt, publishTurnProgress } from "./turn-progress";
 import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
 
 /**
- * pi Coding Agent Runner（性能优化分支，task=turn 专用）。
+ * pi Coding Agent Runner（性能优化分支，task=turn/init 共用）。
  *
  * 执行模型（与 ClaudeCodeRunner 的 agent 自主读写不同）：
  * 1. 服务端预注入全部上下文（pi-prompt.ts），模型禁止读文件
@@ -24,8 +30,8 @@ import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
  * 3. 服务端后处理：解析合并 state-update → 随机判定申报落账 → 写 done.json
  *    （磁盘权威不变，由 Web 侧而非模型写入）→ orchestrator 走既有的校验/提交/回滚链路
  *
- * 可靠性装甲（实测 1/6 概率 qwen"口述不写盘"）：output.md 缺失时自动重试
- * （PI_MAX_ATTEMENTS，默认 2，上限 3）。重试在同一快照窗口内，无半成品风险
+ * 可靠性装甲（实测 1/6 概率 qwen"口述不写盘"）：必需产物缺失或无效时自动重试
+ * （PI_MAX_ATTEMPTS，默认 2，上限 3）。重试在同一快照窗口内，无半成品风险
  * （pi 未写任何文件或只写了部分文件，后续整体回滚/覆盖语义不受影响）。
  *
  * 随机判定（roll-choice，Issue 5）：pi 禁 bash，无法调 roll-choice CLI；
@@ -133,8 +139,12 @@ async function freshFileOk(
   }
 }
 
-/** 三产物齐且形状合法（撕裂写防御）：output 首行契约 + interaction 可解析 */
-async function turnArtifactsComplete(workspaceDir: string, baselines: ArtifactMtimes): Promise<boolean> {
+/** 三产物齐且形状合法（撕裂写防御）：output 首行契约 + interaction 可解析。 */
+async function turnArtifactsComplete(
+  workspaceDir: string,
+  baselines: ArtifactMtimes,
+  task: "turn" | "init" = "turn",
+): Promise<boolean> {
   const turnDir = path.join(workspaceDir, "turn");
   const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
     const first = raw.split("\n").find((l) => l.trim() !== "");
@@ -154,7 +164,9 @@ async function turnArtifactsComplete(workspaceDir: string, baselines: ArtifactMt
     },
   );
   if (!interactionOk) return false;
-  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, () => true);
+  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, (raw) =>
+    task === "init" ? parseInitWorkspaceBundle(raw).ok : true,
+  );
 }
 
 /** mtime 严格新于基线；基线 null（attempt 前不存在）时任何存在都算新 */
@@ -199,10 +211,11 @@ function startEarlyExitWatcher(
   spawnOpts: SpawnOpts,
   workspaceDir: string,
   baselines: ArtifactMtimes,
+  task: "turn" | "init",
 ): PollWatchHandle {
   return startPollWatcher(
     WATCH_INTERVAL_MS,
-    () => turnArtifactsComplete(workspaceDir, baselines),
+    () => turnArtifactsComplete(workspaceDir, baselines, task),
     () => spawnOpts._child?.kill("SIGTERM"),
     earlyExitEnabled(),
   );
@@ -222,13 +235,14 @@ export class PiRunner implements AgentRunner {
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     req.signal.throwIfAborted();
     await ensurePiConfig();
-    const rollPool = generateRollPool(ROLL_POOL_SIZE, this.rollRng);
-    const userPrompt = await buildTurnUserPrompt(
-      req.workspaceDir,
-      req.storyId,
-      req.playerInput,
-      rollPool,
-    );
+    const task = req.task ?? "turn";
+    // Init has no random pool. The same runner still owns both execution
+    // plans; only the prompt, artifact contract, and post-processing differ.
+    const rollPool = task === "init" ? [] : generateRollPool(ROLL_POOL_SIZE, this.rollRng);
+    const userPrompt =
+      task === "init"
+        ? await buildInitUserPrompt(req.workspaceDir, req.playerInput)
+        : await buildTurnUserPrompt(req.workspaceDir, req.storyId, req.playerInput, rollPool);
 
     const args = [
       "-p",
@@ -243,7 +257,7 @@ export class PiRunner implements AgentRunner {
       "--tools",
       "write",
       "--system-prompt",
-      PI_TURN_SYSTEM_PROMPT,
+      task === "init" ? PI_INIT_SYSTEM_PROMPT : PI_TURN_SYSTEM_PROMPT,
       userPrompt,
     ];
 
@@ -271,7 +285,7 @@ export class PiRunner implements AgentRunner {
       };
       req.signal.addEventListener("abort", onAbort);
       const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
-      const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines);
+      const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, task);
 
       let result: SpawnResult;
       try {
@@ -325,6 +339,47 @@ export class PiRunner implements AgentRunner {
         continue;
       }
 
+      if (task === "init") {
+        // Init state-update is a complete workspace bundle, not the turn
+        // APPEND/REPLACE delta format. It is validated in full before any
+        // conceptual file is touched; invalid attempts are retried.
+        const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
+        if (!(await mtimeFresherThan(stateUpdatePath, artifactBaselines.stateUpdate))) {
+          diagnostics.push(`attempt ${attempt}: init bundle missing or stale`);
+          continue;
+        }
+        let rawBundle: string;
+        try {
+          rawBundle = await fs.readFile(stateUpdatePath, "utf8");
+        } catch {
+          diagnostics.push(`attempt ${attempt}: init bundle read failed`);
+          continue;
+        }
+        const parsedBundle = parseInitWorkspaceBundle(rawBundle);
+        if (!parsedBundle.ok) {
+          diagnostics.push(`attempt ${attempt}: ${parsedBundle.error}`);
+          continue;
+        }
+        try {
+          await applyInitWorkspaceBundle(req.workspaceDir, parsedBundle.files);
+        } catch (err) {
+          const detail = sanitizeForLog(err instanceof Error ? err.message : String(err));
+          // A valid bundle can still fail during the filesystem commit (for
+          // example, a target path became a directory). Applying it may have
+          // touched some conceptual files already, so never retry against the
+          // same workspace. The orchestrator owns the snapshot rollback.
+          return {
+            success: false,
+            error: "pi init bundle apply failed",
+            detail: `attempt ${attempt}: init bundle apply failed: ${detail}`,
+          };
+        }
+        await writeDoneMarker(req.workspaceDir);
+        const notes: string[] = [];
+        if (watcher.fired) notes.push("early-exit fired (skipped final round-trip)");
+        return { success: true, detail: notes.length > 0 ? notes.join("; ") : undefined };
+      }
+
       // 成功：合并状态更新 + 落账随机判定（均降级不致命）→ 服务端写 done.json
       const mergeDiags: string[] = [];
       let rolls: RollDeclaration[] = [];
@@ -357,9 +412,10 @@ export class PiRunner implements AgentRunner {
       };
     }
 
+    const missingArtifact = task === "init" ? "init artifact/bundle" : "turn output";
     return {
       success: false,
-      error: `pi produced no turn output after ${maxAttempts} attempt(s)`,
+      error: `pi produced no ${missingArtifact} after ${maxAttempts} attempt(s)`,
       detail: sanitizeForLog(diagnostics.join("\n---\n")).slice(0, 4000),
     };
   }
