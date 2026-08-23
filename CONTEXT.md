@@ -152,6 +152,7 @@ _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 o
 
 ### Pi Runner（pi 运行器）
 性能优化分支（2026-08）引入的 Pi Runner 同时承载 Story Turn 与 Story Initialization。服务端按 `req.task` 选择内部计划：turn 预注入全部 workspace 上下文并写增量 State Update Bundle；init 先执行 Phase 1（预注入用户 canon/骨架，只写完整 Init Workspace Bundle），应用概念文件后再执行 Phase 2（只预注入主角可见 opening context，只写 output/interaction）。每阶段候选都由服务端校验，成功后才写 Done Marker；init 不注入随机池。模型禁止读文件，工具面收窄至 write，每次冷启动、无会话记忆（磁盘是唯一真相）；内置自动重试和 mtime 新鲜度门，避免残留产物蒙混提交。Pi 启动时显式加载仓库内受控 write extension，按阶段放行精确候选文件；每个 init attempt 结束后再用完整 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。`--mode json` 事件流驱动叙事先行预览（init 仅在 Phase 2 两个候选事件都到齐后发布，见 Player-visible Output 词条例外）。模型锁定 qwen-fp8。
+2026-08-23 第二轮真实 A/B 因安全收口仅部分执行：Pi 在 S01–S03 均连续两次未通过 Phase 1 Bundle 新鲜/完整门（`init bundle missing or stale`），Claude S01–S03 成功；S04 Claude 在完成前中止，S04 Pi 与 S05 未执行。该结果不是完整质量验收，下一步先诊断 Pi Phase 1 的事件、extension/path、prompt 和 Bundle 写盘证据，再本地测试并重新授权；不得据此删除 Claude。
 
 ### Turn Progress Registry（回合进度注册表）
 回合进行时的进程内单例（挂 globalThis——Next 构建会把模块复制进多个路由包，模块级 Map 会分裂成两份），PiRunner 发布"叙事/选项组合完成"相位，turn-preview 轮询接口读取，Orchestrator 回合终局清空。attempt 单调令牌防御迟到的异步发布（泄密守卫读盘跨越重试/终局时落地会推翻撤回或形成僵尸预览）；发布前的泄密守卫与提交校验同源。预览永远不是权威。

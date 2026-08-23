@@ -10,7 +10,7 @@
 
 第一阶段新增 `AGENT_RUNNER=pi` 和 `docker-compose.pi.yml`，让 init/turn 都走 Pi；现有 `AGENT_RUNNER=claude` 暂时保留为 A/B 质量基线（仍是 turn→Pi、init→Claude）。只有真实初始化对比验收通过后，第二阶段才删除 Claude Code Runner、Claude settings、Claude prompt、容器内 Claude CLI 和旧 Compose 覆盖文件。
 
-当前第一阶段实现状态：PiRunner 已按 `req.task` 选择 init/turn 计划；init 分为两个严格阶段：Phase 1 只写并校验完整 Init Workspace Bundle，应用后 Phase 2 只写 opening 的 output/interaction，服务端最终写 Done Marker。受控 write extension 接收 runner 注入的阶段 allowlist，在工具执行前拦截越权路径；每个阶段 attempt 结束后再以完整 workspace manifest 做纵深校验，失败交给 Orchestrator 快照回滚；opening context 只包含主角可见字段。Pi compose、fake-pi 链路和中性受控子进程 seam 已加入。Claude runner、settings、prompt、fixture 与专属测试仍保留用于 A/B 基线；首次 A/B 结果见 [`docs/acceptance/2026-08-23-pi-init-ab-acceptance.md`](../acceptance/2026-08-23-pi-init-ab-acceptance.md)。
+当前第一阶段实现状态：PiRunner 已按 `req.task` 选择 init/turn 计划；init 分为两个严格阶段：Phase 1 只写并校验完整 Init Workspace Bundle，应用后 Phase 2 只写 opening 的 output/interaction，服务端最终写 Done Marker。受控 write extension 接收 runner 注入的阶段 allowlist，在工具执行前拦截越权路径；每个阶段 attempt 结束后再以完整 workspace manifest 做纵深校验，失败交给 Orchestrator 快照回滚；opening context 只包含主角可见字段。Pi compose、fake-pi 链路和中性受控子进程 seam 已加入。Claude runner、settings、prompt、fixture 与专属测试仍保留用于 A/B 基线；首次 A/B 结果见 [`docs/acceptance/2026-08-23-pi-init-ab-acceptance.md`](../acceptance/2026-08-23-pi-init-ab-acceptance.md)。第二轮真实 A/B 按用户授权启动后因安全要求部分终止：Pi S01–S03 均两次 `init bundle missing or stale`，Claude S01–S03 成功，S04 Claude 中止，S04 Pi/S05 未执行；详见 [`docs/acceptance/2026-08-23-pi-init-ab-round2-partial.md`](../acceptance/2026-08-23-pi-init-ab-round2-partial.md)。这不是完整质量门结果，不改变保留 Claude 的结论。
 
 ## 原因
 
@@ -92,7 +92,7 @@ Bundle 通过后才批量写入概念文件。Phase 2 只接收服务端筛选�
 - 初始化开场可以复用现有叙事先行预览，但只有 Phase 2 的 output 与 interaction 两个本 attempt 事件都到齐后，才用本次 interaction 原文作 output 泄密指纹；预览仍非权威，失败或重试时撤回。
 - 初始化概念文件应用后，仍由 Orchestrator 执行 `validateInitWorkspace`、输出隔离、受保护路径逐字比对、Opening Entry 提交和 Initialized Marker 提交。
 - 任一步失败都由现有快照恢复整个 Story Workspace。
-- 单次 Bundle 曾出现角色结构与开场隔离难以同时稳定满足的质量风险；因此按本 ADR 的退路规则触发两阶段 Pi 调用（概念 Bundle → player-visible opening），不放宽质量门。第一阶段真实 A/B 记录见 acceptance 报告；后续若 Phase 2 仍失败，优先由 Orchestrator 回滚整轮并继续保留 Claude 基线。
+- 单次 Bundle 曾出现角色结构与开场隔离难以同时稳定满足的质量风险；因此按本 ADR 的退路规则触发两阶段 Pi 调用（概念 Bundle → player-visible opening），不放宽质量门。第一阶段真实 A/B 记录见 acceptance 报告；第二轮部分执行暴露 Pi Phase 1 的系统性 missing/stale 阻塞，下一步先诊断事件、extension/path、prompt 与 Bundle 写盘/mtime 证据并完成本地测试；在重新取得授权并完成完整 A/B 前，优先由 Orchestrator 回滚整轮并继续保留 Claude 基线。
 
 ## Prompt 约束
 
