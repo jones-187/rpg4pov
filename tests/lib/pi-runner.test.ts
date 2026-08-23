@@ -52,7 +52,13 @@ const INIT_BUNDLE = [
   "# 守塔人\n\n## Emotional Core\ncoreNeed: 有人留下。\ncoreFear: 灯火熄灭。\n\n## Relationship State: 主角\nsurfaceRelationship: 新来的学徒。\n\n## Emotionally Salient Memories\nevent: 上一任守塔人失踪。\nmeaning: 灯不能无人照看。\nimpact: 他不再轻信离开的人。\n\n## Current Intent\ncurrentEmotion: 警觉。\nimmediateGoal: 试探学徒。\nhiddenIntent: 确认学徒是否可靠。\nrestraint: 不愿暴露秘密。\nvoice: 短句。",
 ].join("\n");
 
-const ENV_KEYS = ["PI_HOME", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"] as const;
+const ENV_KEYS = [
+  "PI_HOME",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_MODEL",
+  "PI_WRITE_BOUNDARY_EXTENSION_PATH",
+] as const;
 let savedEnv: Record<string, string | undefined>;
 let piHome: string;
 
@@ -108,6 +114,73 @@ describe("PiRunner", () => {
     await expect(fs.readFile(path.join(dir, "world.md"), "utf8")).resolves.toContain("废弃灯塔");
     await expect(fs.readFile(path.join(dir, "actors/keeper.md"), "utf8")).resolves.toContain("Emotional Core");
     await expect(fs.readFile(path.join(dir, "turn/done.json"), "utf8")).resolves.toContain("success");
+  });
+
+  it("passes the fail-closed write extension to every Pi startup", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeSpawn([
+      { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON },
+    ]);
+    const runner = new PiRunner({ spawnFn: spawn });
+
+    const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(true);
+    const noExtensions = calls[0].args.indexOf("--no-extensions");
+    const extension = calls[0].args.indexOf("--extension");
+    expect(noExtensions).toBeGreaterThan(-1);
+    expect(extension).toBeGreaterThan(-1);
+    expect(calls[0].args[extension + 1]).toBe(
+      path.resolve(process.cwd(), "pi-extensions/write-boundary.ts"),
+    );
+  });
+
+  it("uses an explicit readable PI_WRITE_BOUNDARY_EXTENSION_PATH override", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const extensionPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "pi-extension-")), "boundary.ts");
+    await fs.writeFile(extensionPath, "export default () => {};\n");
+    const previous = process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH;
+    process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH = extensionPath;
+    try {
+      const { spawn, calls } = makeSpawn([
+        { "turn/output.md": OUTPUT_MD, "turn/interaction.json": INTERACTION_JSON },
+      ]);
+      const result = await new PiRunner({ spawnFn: spawn }).runTurn(turnRequest(meta.storyId, dir));
+
+      expect(result.success).toBe(true);
+      const extension = calls[0].args.indexOf("--extension");
+      expect(calls[0].args[extension + 1]).toBe(extensionPath);
+    } finally {
+      if (previous === undefined) delete process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH;
+      else process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH = previous;
+    }
+  });
+
+  it("fails closed before spawn when the write extension is missing", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const previous = process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH;
+    process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH = path.join(dir, "missing-extension.ts");
+    let spawnCalls = 0;
+    try {
+      const runner = new PiRunner({
+        spawnFn: async () => {
+          spawnCalls++;
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      });
+
+      const result = await runner.runTurn(turnRequest(meta.storyId, dir));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("pi write boundary extension unavailable");
+      expect(spawnCalls).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH;
+      else process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH = previous;
+    }
   });
 
   it("task=init retries an invalid bundle without partially applying conceptual files", async () => {
@@ -343,6 +416,8 @@ describe("PiRunner", () => {
     const toolsIdx = calls[0].args.indexOf("--tools");
     expect(toolsIdx).toBeGreaterThan(-1);
     expect(calls[0].args[toolsIdx + 1]).toBe("write");
+    expect(calls[0].args).toContain("--no-extensions");
+    expect(calls[0].args).toContain("--extension");
     const userPrompt = calls[0].args[calls[0].args.length - 1];
     expect(userPrompt).toContain("=== world.md ===");
     expect(userPrompt).toContain("=== turns/history.jsonl");

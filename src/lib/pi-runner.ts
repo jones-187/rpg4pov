@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
 import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./agent-spawn";
@@ -57,6 +57,10 @@ const INIT_ALLOWED_ARTIFACTS = [
   "turn/interaction.json",
   "turn/state-update.md",
 ] as const;
+const DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH = path.resolve(
+  process.cwd(),
+  "pi-extensions/write-boundary.ts",
+);
 
 /** 从 process.env 传递给 pi 的白名单（models.json 已含密钥，不传 token） */
 const PI_ENV_WHITELIST = ["PATH", "HOME", "NODE_ENV", "TMPDIR"];
@@ -72,6 +76,27 @@ function resolveMaxAttempts(): number {
   const parsed = raw ? Number(raw) : NaN;
   if (!Number.isFinite(parsed)) return 2;
   return Math.min(3, Math.max(1, Math.floor(parsed)));
+}
+
+function resolvePiWriteBoundaryExtensionPath(): string {
+  const configured = process.env.PI_WRITE_BOUNDARY_EXTENSION_PATH?.trim();
+  return path.resolve(configured || DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH);
+}
+
+/**
+ * The write boundary is a fail-closed startup prerequisite. The extension is
+ * the pre-execution guard; Pi must never start without a readable copy of it.
+ */
+async function ensurePiWriteBoundaryExtension(): Promise<string | null> {
+  const extensionPath = resolvePiWriteBoundaryExtensionPath();
+  try {
+    const stat = await fs.stat(extensionPath);
+    if (!stat.isFile()) return null;
+    await fs.access(extensionPath, fsConstants.R_OK);
+    return extensionPath;
+  } catch {
+    return null;
+  }
 }
 
 /** 服务端权威写入 done.json（形状与 workspace.DoneMarker 一致） */
@@ -245,6 +270,14 @@ export class PiRunner implements AgentRunner {
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     req.signal.throwIfAborted();
+    const writeBoundaryExtensionPath = await ensurePiWriteBoundaryExtension();
+    if (writeBoundaryExtensionPath === null) {
+      return {
+        success: false,
+        error: "pi write boundary extension unavailable",
+        detail: `required readable extension: ${resolvePiWriteBoundaryExtensionPath()}`,
+      };
+    }
     await ensurePiConfig();
     const task = req.task ?? "turn";
     // Init has no random pool. The same runner still owns both execution
@@ -267,6 +300,11 @@ export class PiRunner implements AgentRunner {
       // 工具面收窄到 write：契约本就禁止读/bash，列表里不存在比措辞约束更硬
       "--tools",
       "write",
+      // Extension loading is explicit even with the default extension set
+      // disabled: the boundary runs before each write tool execution.
+      "--no-extensions",
+      "--extension",
+      writeBoundaryExtensionPath,
       "--system-prompt",
       task === "init" ? PI_INIT_SYSTEM_PROMPT : PI_TURN_SYSTEM_PROMPT,
       userPrompt,

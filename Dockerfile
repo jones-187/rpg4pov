@@ -49,6 +49,7 @@ ENV HOSTNAME=0.0.0.0
 ENV WORKSPACE_ROOT=/app/data/workspaces
 ENV USE_BUILTIN_RIPGREP=0
 ENV SHELL=/bin/bash
+ENV PI_WRITE_BOUNDARY_EXTENSION_PATH=/app/pi-extensions/write-boundary.ts
 
 # alpine musl 适配：装 ripgrep（claude bundled ripgrep 是 glibc 编译）+ bash
 RUN apk add --no-cache ripgrep bash
@@ -79,6 +80,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/claude-settings.json /app/claude/
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/pi-extensions /app/pi-extensions
 # 复制 CLI 工具到 /app/cli/（从 dist/ 编译产物复制，对 agent 隐藏 dist/ 编译细节）
 # roll-choice.js require('../lib/random-tool')，所以 /app/lib/ 需存在
 # 必须在 standalone COPY 之后，否则被 standalone 层覆盖

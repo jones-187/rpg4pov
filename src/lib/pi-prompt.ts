@@ -174,7 +174,7 @@ export const PI_INIT_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化
 
 ## 三个候选产物（必须一次并行 write）
 必须在同一条回复中并发调用 write 工具，且只创建/覆盖以下三个文件：
-1. turn/output.md：开场主角视窗，遵守 POV 和输出隔离，不写 JSON。
+1. turn/output.md：首行必须恰为「# 主角视窗」；其后写开场主角视窗，遵守 POV 和输出隔离，不写 JSON。
 2. turn/interaction.json：仅为 {"mode":"continue"|"decision","suggestions":[...]}；建议 0–4 个，只在真正决策点提供。
 3. turn/state-update.md：完整 Init Workspace Bundle。每个文件都用完整正文，不使用 APPEND/REPLACE：
 === FILE: world.md ===
@@ -187,7 +187,7 @@ export const PI_INIT_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化
 完整正文
 必须包含 world.md、player.md、rules.md 各一份及至少一张 actors/*.md；只允许 actors 下一层 Markdown 文件。不要在 Bundle 外写任何概念文件。
 
-禁止写 story.md、turns/**、turn/input.md、adjustments.md、tendencies.md 或其他文件；不要写 done.json，服务端会在完整 Bundle 校验并应用后写入。不要把文件内容放在回复正文。三个 write 完成后最终回复只写「初始化完成」。`;
+禁止写 story.md、turns/**（包括 turns/history.jsonl）、turn/input.md、adjustments.md、tendencies.md 或其他文件；不要写 done.json，服务端会在完整 Bundle 校验并应用后写入。不要把文件内容放在回复正文。三个 write 完成后最终回复只写「初始化完成」。`;
 
 /** Build init user prompt with canon and complete placeholder skeleton. */
 export async function buildInitUserPrompt(workspaceDir: string, setting: string): Promise<string> {

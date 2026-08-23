@@ -107,6 +107,28 @@ describe("PI_INIT_SYSTEM_PROMPT", () => {
     expect(prompt).not.toContain("R1=");
     expect(prompt).not.toContain("=== 随机数池");
   });
+
+  it("明确隔离玩家历史与服务端标记文件", () => {
+    expect(PI_INIT_SYSTEM_PROMPT).toContain("turns/**（包括 turns/history.jsonl）");
+    expect(PI_INIT_SYSTEM_PROMPT).toContain("不要写 done.json");
+    expect(PI_INIT_SYSTEM_PROMPT).toContain("其他文件");
+  });
+
+  it("初始化 output 的首行契约同时写明首行和标题", () => {
+    const outputInstruction = PI_INIT_SYSTEM_PROMPT
+      .split("\n")
+      .find((line) => line.includes("turn/output.md"));
+    expect(outputInstruction).toBeDefined();
+    expect(outputInstruction).toContain("首行");
+    expect(outputInstruction).toContain("# 主角视窗");
+  });
+
+  it("buildInitUserPrompt 原样保留 canon 中的 $&", async () => {
+    const meta = await createStory();
+    const canon = "保留字面量 $&，不要将它当作替换模板。";
+    const prompt = await buildInitUserPrompt(resolveWorkspaceDir(meta.storyId), canon);
+    expect(prompt).toContain(canon);
+  });
 });
 
 describe("buildTurnUserPrompt", () => {

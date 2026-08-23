@@ -103,7 +103,9 @@ docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
   turns/history.jsonl   # 已提交的玩家可见回合历史（Issue 6.5；含 opening 与 turn 两类条目）
 ```
 
-pi 运行时（init/turn）可调环境变量：`PI_HISTORY_LIMIT`（prompt 注入的历史条数上界，默认 5）、`PI_MAX_ATTEMPTS`（"口述不写盘"失效自动重试次数，默认 2、上限 3）、`PI_PATH`（pi 可执行文件路径覆盖，默认 `pi`）、`PI_EARLY_EXIT`（早退看门狗：三产物落盘即 SIGTERM 跳过收尾往返，默认开，`=0` 关闭）、`PI_ACTOR_BUDGET_BYTES`（单张角色卡字节预算，超限注入瘦身指令，默认 6144，夹取 2048-65536）、`CLAUDE_EARLY_EXIT`（Claude init 路径 done.json 看门狗：契约要求 done.json 最后写，落盘即 SIGTERM 砍掉 post-done 自查尾巴，默认开，`=0` 关闭）。模型经 `ANTHROPIC_MODEL` 指定，默认且验收锁定 `qwen-fp8`；pi 的 provider 配置（`~/.pi/agent/models.json`）由应用从 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）幂等生成，不进镜像。
+Pi 运行时（覆盖 init/turn）可调环境变量：`PI_HISTORY_LIMIT`（prompt 注入的历史条数上界，默认 5）、`PI_MAX_ATTEMPTS`（"口述不写盘"失效自动重试次数，默认 2、上限 3）、`PI_PATH`（pi 可执行文件路径覆盖，默认 `pi`）、`PI_EARLY_EXIT`（早退看门狗：三产物落盘即 SIGTERM 跳过收尾往返，默认开，`=0` 关闭）、`PI_ACTOR_BUDGET_BYTES`（单张角色卡字节预算，超限注入瘦身指令，默认 6144，夹取 2048-65536）、`PI_WRITE_BOUNDARY_EXTENSION_PATH`（受控 write extension 路径，默认 `/app/pi-extensions/write-boundary.ts`）、`CLAUDE_EARLY_EXIT`（Claude init 路径 done.json 看门狗：契约要求 done.json 最后写，落盘即 SIGTERM 砍掉 post-done 自查尾巴，默认开，`=0` 关闭）。模型经 `ANTHROPIC_MODEL` 指定，默认且验收锁定 `qwen-fp8`；pi 的 provider 配置（`~/.pi/agent/models.json`）由应用从 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）幂等生成，不进镜像。
+
+Pi 启动时由受控 extension 在 write 工具执行前只放行三个 `turn/` 候选文件；init attempt 结束后再由 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。
 
 叙事先行：回合 pending 期间前端轮询 `GET /api/stories/{storyId}/turn-preview`，pi 事件流中 output.md/interaction.json 组合完成（早于进程退出与服务端收尾）即先显示叙事与建议；预览不是权威，回合失败/重试时前端撤回，最终以 POST 响应的 committed turn 为准。Pi init 侧预注入骨架与 canon，三个候选产物中的完整 Bundle 经服务端校验后批量应用，再写 done.json。
 

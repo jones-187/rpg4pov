@@ -10,7 +10,7 @@
 
 第一阶段新增 `AGENT_RUNNER=pi` 和 `docker-compose.pi.yml`，让 init/turn 都走 Pi；现有 `AGENT_RUNNER=claude` 暂时保留为 A/B 质量基线（仍是 turn→Pi、init→Claude）。只有真实初始化对比验收通过后，第二阶段才删除 Claude Code Runner、Claude settings、Claude prompt、容器内 Claude CLI 和旧 Compose 覆盖文件。
 
-当前第一阶段实现状态：PiRunner 已按 `req.task` 选择 init/turn 计划；init 的三个候选产物经完整 Init Workspace Bundle 校验后才应用并由 Web 侧写 Done Marker；Pi compose、fake-pi 链路和中性受控子进程 seam 已加入。Claude runner、settings、prompt、fixture 与专属测试仍保留用于 A/B 基线。
+当前第一阶段实现状态：PiRunner 已按 `req.task` 选择 init/turn 计划；init 的三个候选产物经完整 Init Workspace Bundle 校验后才应用并由 Web 侧写 Done Marker；Pi 启动时显式加载受控 write extension，在工具执行前只放行三个精确候选路径，init attempt 结束后再以完整 workspace manifest 做纵深校验；Pi compose、fake-pi 链路和中性受控子进程 seam 已加入。Claude runner、settings、prompt、fixture 与专属测试仍保留用于 A/B 基线。
 
 ## 原因
 
@@ -40,6 +40,8 @@ interface AgentRunner {
 ### 外部 CLI seam：受控子进程
 
 把通用 `SpawnFn`、`SpawnOpts`、`SpawnResult` 和 `defaultSpawn` 从 `claude-code-runner.ts` 移到中性模块。Pi Runner 只在这个外部进程 seam 注入测试替身。stdin/stdout 尾部缓冲、逐行事件和 abort/kill 语义保持不变。
+
+Pi 原生 write 工具接受相对路径和绝对路径，不能把 cwd 当作权限边界。因此 Pi Runner 使用 `--no-extensions` 禁用自动发现，只显式加载仓库内受控 write extension；extension 在工具执行前仅允许 `turn/output.md`、`turn/interaction.json`、`turn/state-update.md` 三个字面量相对路径，并拒绝绝对路径、目录穿越、相似路径和符号链接。init 路径再对 spawn 前后的整个 Story Workspace 做 manifest 对比；除三个候选文件外的任何新增、删除或改写都立即失败且不重试，由 Orchestrator 快照回滚。
 
 ### 初始化 Bundle
 
@@ -73,6 +75,7 @@ Pi 初始化仍只并行写三个临时产物：
 - 拒绝绝对路径、目录穿越、重复文件、空内容及占位内容。
 - 拒绝 `story.md`、`turns/**`、`turn/input.md`、`adjustments.md`、`tendencies.md` 和其他路径。
 - Bundle 无效时不得应用任何概念文件，当前 attempt 进入重试；所有 attempt 失败时不写 Done Marker，由 Orchestrator 统一回滚。
+- 模型对 Bundle 外路径的 write 调用在执行前被受控 extension 拒绝；若仍产生越权变化，init workspace manifest 会令本轮失败并触发回滚。
 
 Bundle 通过后才批量写入概念文件，最后由服务端写 `turn/done.json`。模型永远不直接写故事正式文件或 Done Marker。
 
