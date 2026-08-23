@@ -14,7 +14,7 @@ const cwd = process.cwd();
 const turnDir = path.join(cwd, "turn");
 await fs.mkdir(turnDir, { recursive: true });
 
-if (systemPrompt.includes("故事初始化 agent")) {
+if (systemPrompt.includes("Phase 1")) {
   const setting = prompt.match(/## 用户设定（canon，优先级最高）\n([\s\S]*?)\n\n## 初始化骨架文件/)?.[1]?.trim() ?? "";
   const bundle = [
     "=== FILE: world.md ===",
@@ -83,9 +83,10 @@ if (systemPrompt.includes("故事初始化 agent")) {
     "behaviorStrategy: 用工作指令观察耐心。",
     "voice: 短句，答一半，关键处停顿。",
   ].join("\n");
+  await fs.writeFile(path.join(turnDir, "state-update.md"), bundle);
+} else if (systemPrompt.includes("Phase 2")) {
   await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n雾从门缝里漫进来，灯塔的铜铃忽然响了一声。\n");
   await fs.writeFile(path.join(turnDir, "interaction.json"), JSON.stringify({ mode: "continue", suggestions: [] }));
-  await fs.writeFile(path.join(turnDir, "state-update.md"), bundle);
 } else {
   await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n我沿着湿滑的石阶向上，守塔人没有阻拦，只把钥匙收回掌心。\n");
   await fs.writeFile(path.join(turnDir, "interaction.json"), JSON.stringify({ mode: "decision", suggestions: ["追问钥匙的来历"] }));

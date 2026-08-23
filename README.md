@@ -2,7 +2,7 @@
 
 小场景、多角色、主角视角受限的 AI 故事模拟引擎。目标体验偏 galgame、同人游戏和视觉小说：以人物关系、角色对话、主角第一人称内心独白和 NPC 主动行动推动故事。
 
-当前仓库状态：**性能优化分支（dev/perf）第一阶段：Story Initialization 与 Story Turn 均可由统一的 pi coding agent 执行——服务端预注入上下文，模型并行写三产物（output / interaction / state-update），初始化的完整 Bundle 或回合增量由服务端校验/应用并写 done 标记；`AGENT_RUNNER=claude` 保留 turn→Pi、init→Claude 的 A/B 基线。** 端到端实测（WSL Docker + NewAPI + qwen-fp8）：init ~2 分钟、回合冷 ~61s / 暖 ~43s（迁移前 ~3 分钟）。随机判定经预掷随机数池进入 pi 回合路径：服务端 crypto 预生成样本注入 prompt、模型按序消耗申报、服务端权威重算落账审计日志（CONTEXT.md「Pre-rolled Random Pool」）。决策记录与被否决备选见 `docs/adr/0001-pi-turn-runner.md`。
+当前仓库状态：**性能优化分支第一阶段：Story Turn 继续由 Pi 执行；Story Initialization 由同一个 PiRunner 严格分为 Phase 1 概念 Bundle 与 Phase 2 主角可见 opening，两阶段都由服务端校验、应用/提交并写 done 标记；`AGENT_RUNNER=claude` 保留 turn→Pi、init→Claude 的 A/B 基线。** Pi init 的 Phase 1 只写 `turn/state-update.md`，Phase 2 只写 `turn/output.md` 与 `turn/interaction.json`；受控 write extension 做执行前边界，workspace manifest 做执行后纵深校验。随机判定仅进入 Pi 回合路径：服务端 crypto 预生成样本注入 prompt、模型按序消耗申报、服务端权威重算落账审计日志（CONTEXT.md「Pre-rolled Random Pool」）。决策记录与被否决备选见 `docs/adr/0001-pi-turn-runner.md`。
 此前 Issue 7-14 已实现并验收（含 Issue 13 NPC 情感连续性、Issue 14 committed history 隔离）；性能优化分支同时关闭了 Issue 14 遗留的"权限层 Docker 复验"：实测 claude CLI 2.1.140 + 网关环境下 settings 路径规则对 Write 完全不匹配，init 改 `--tools=Read,Write` + auto，受保护文件（turns/**、story.md、turn/input.md）由 orchestrator 基线比对守卫 fail-closed 保护。
 首页可创建/列出故事，进入故事页先填写小场景设定完成初始化（`create → init → turn` 状态机在 API 层强制），再发送主角输入；后端按 storyId 定位独立 workspace，`AGENT_RUNNER=pi` 时 init/turn 共用 Pi Runner，`AGENT_RUNNER=claude` 时按 task 分发 runner（turn → Pi Runner、init → Claude Code Runner；默认 Fake Agent），返回主角可见输出，开场与每回合追加到玩家可见历史。
 已具备单回合安全边界（串行、快照、失败回滚、受保护路径基线守卫）、输出格式契约校验（首行 `# 主角视窗`，不合规回合失败回滚）；committed 玩家历史 exclusively 由 orchestrator 提交——agent 执行期间对 `turns/history.jsonl` 的任何改动都会被逐字比对拦截并整轮回滚。
@@ -51,13 +51,13 @@ docker compose up --build
 # 第三方 API（如 OpenRouter、自建代理）
 ANTHROPIC_AUTH_TOKEN=your-token
 ANTHROPIC_BASE_URL=https://your-api-proxy
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=qwen-fp8
 
 # 或官方 API
 ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
-Anthropic 协议兼容网关同样可用（实测：NewAPI 网关 + Qwen 模型，`ANTHROPIC_BASE_URL` 填网关根地址、`ANTHROPIC_MODEL` 填网关内的模型名）。注意镜像内 claude CLI 锁定 **2.1.140**：v2.1.142+ 会把 system 消息放进 messages 数组非开头位置，部分第三方网关（new-api 等）会返回 400 "System message must be at the beginning"，官方 API 不受影响。
+Anthropic 协议兼容网关同样可用（实测：NewAPI 网关 + Qwen 模型，`ANTHROPIC_BASE_URL` 填网关根地址）。项目把 `ANTHROPIC_MODEL` 硬锁为 `qwen-fp8`：缺省时自动使用该值，配置为其他值会直接拒绝启动 agent，不会回退或换模型。注意镜像内 claude CLI 锁定 **2.1.140**：v2.1.142+ 会把 system 消息放进 messages 数组非开头位置，部分第三方网关（new-api 等）会返回 400 "System message must be at the beginning"，官方 API 不受影响。
 
 2. 使用 claude compose 覆盖文件启动：
 
@@ -105,9 +105,9 @@ docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
 
 Pi 运行时（覆盖 init/turn）可调环境变量：`PI_HISTORY_LIMIT`（prompt 注入的历史条数上界，默认 5）、`PI_MAX_ATTEMPTS`（"口述不写盘"失效自动重试次数，默认 2、上限 3）、`PI_PATH`（pi 可执行文件路径覆盖，默认 `pi`）、`PI_EARLY_EXIT`（早退看门狗：三产物落盘即 SIGTERM 跳过收尾往返，默认开，`=0` 关闭）、`PI_ACTOR_BUDGET_BYTES`（单张角色卡字节预算，超限注入瘦身指令，默认 6144，夹取 2048-65536）、`PI_WRITE_BOUNDARY_EXTENSION_PATH`（受控 write extension 路径，默认 `/app/pi-extensions/write-boundary.ts`）、`CLAUDE_EARLY_EXIT`（Claude init 路径 done.json 看门狗：契约要求 done.json 最后写，落盘即 SIGTERM 砍掉 post-done 自查尾巴，默认开，`=0` 关闭）。模型经 `ANTHROPIC_MODEL` 指定，默认且验收锁定 `qwen-fp8`；pi 的 provider 配置（`~/.pi/agent/models.json`）由应用从 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）幂等生成，不进镜像。
 
-Pi 启动时由受控 extension 在 write 工具执行前只放行三个 `turn/` 候选文件；init attempt 结束后再由 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。
+Pi 启动时由受控 extension 在 write 工具执行前按阶段放行精确候选文件：Phase 1 仅 `turn/state-update.md`，Phase 2 仅 `turn/output.md` 与 `turn/interaction.json`，turn 才使用三文件集合；每个 init attempt 结束后再由 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。
 
-叙事先行：回合 pending 期间前端轮询 `GET /api/stories/{storyId}/turn-preview`，pi 事件流中 output.md/interaction.json 组合完成（早于进程退出与服务端收尾）即先显示叙事与建议；预览不是权威，回合失败/重试时前端撤回，最终以 POST 响应的 committed turn 为准。Pi init 侧预注入骨架与 canon，三个候选产物中的完整 Bundle 经服务端校验后批量应用，再写 done.json。
+叙事先行：回合 pending 期间前端轮询 `GET /api/stories/{storyId}/turn-preview`，pi 事件流中 output.md/interaction.json 组合完成（早于进程退出与服务端收尾）即先显示叙事与建议；预览不是权威，回合失败/重试时前端撤回，最终以 POST 响应的 committed turn 为准。Pi init Phase 2 也可复用该预览，但必须等本次 output 与 interaction 两个事件都到齐，并用本次 interaction 原文做泄密校验；Phase 1 不发布 opening 预览。
 
 主角可见输出只来自 `turn/output.md`；Web 不读取 agent stdout、logs、world、player、actors。
 玩家可见历史来自 `turns/history.jsonl`，是已提交的完整回合记录。

@@ -12,7 +12,7 @@ const VALID_BUNDLE = [
   "=== FILE: rules.md ===",
   "# 规则\n\n风险由随机工具判定。",
   "=== FILE: actors/keeper.md ===",
-  "# 守塔人\n\n## Emotional Core\ncoreNeed: 被需要。",
+  "# 守塔人\n\n## 表面形象\n穿旧雨衣，手上有灯油味。\n\n## voice\n短句，少解释。\n\n## Emotional Core\ncoreNeed: 被需要。\n\n## Relationship State: 主角\nsurfaceRelationship: 新来的学徒。\n\n## Emotionally Salient Memories\n（初始暂无。）\n\n## Current Intent\ncurrentEmotion: 警觉。",
 ].join("\n");
 
 describe("Init Workspace Bundle", () => {
@@ -69,5 +69,18 @@ describe("Init Workspace Bundle", () => {
     "=== FILE: world.md ===\n内容\n=== FILE: player.md ===\n内容\n=== FILE: rules.md ===\n内容\n=== FILE: actors/a.md ===\n（占位）",
   ])("rejects malformed or out-of-scope file sections: %s", (bundle) => {
     expect(parseInitWorkspaceBundle(bundle).ok).toBe(false);
+  });
+
+  it("rejects an actor bundle that omits the Emotionally Salient Memories heading", () => {
+    const missingHeading = VALID_BUNDLE.replace("## Emotionally Salient Memories", "## 私有记忆");
+    expect(parseInitWorkspaceBundle(missingHeading).ok).toBe(false);
+  });
+
+  it("requires event, meaning, and impact when initial memories are present", () => {
+    const incompleteMemory = VALID_BUNDLE.replace(
+      "（初始暂无。）",
+      "- event: 旧事故\n- meaning: 他仍未释怀。",
+    );
+    expect(parseInitWorkspaceBundle(incompleteMemory).ok).toBe(false);
   });
 });

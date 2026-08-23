@@ -151,7 +151,7 @@ _Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.
 _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
 
 ### Pi Runner（pi 运行器）
-性能优化分支（2026-08）引入的 Pi Runner 同时承载 Story Turn 与 Story Initialization。服务端按 `req.task` 选择内部计划：turn 预注入全部 workspace 上下文并写增量 State Update Bundle；init 预注入用户 canon 与初始化骨架，写完整 Init Workspace Bundle。两条路径都由服务端校验产物、应用状态并写 Done Marker；init 不注入随机池。模型禁止读文件，工具面收窄至 write，每回合冷启动、无会话记忆（磁盘是唯一真相）；内置自动重试和 mtime 新鲜度门，避免残留产物蒙混提交。Pi 启动时显式加载仓库内受控 write extension，在工具执行前只放行三个 `turn/` 候选文件；init attempt 结束后再用完整 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。`--mode json` 事件流驱动叙事先行预览（见 Player-visible Output 词条例外）。模型锁定 qwen-fp8。
+性能优化分支（2026-08）引入的 Pi Runner 同时承载 Story Turn 与 Story Initialization。服务端按 `req.task` 选择内部计划：turn 预注入全部 workspace 上下文并写增量 State Update Bundle；init 先执行 Phase 1（预注入用户 canon/骨架，只写完整 Init Workspace Bundle），应用概念文件后再执行 Phase 2（只预注入主角可见 opening context，只写 output/interaction）。每阶段候选都由服务端校验，成功后才写 Done Marker；init 不注入随机池。模型禁止读文件，工具面收窄至 write，每次冷启动、无会话记忆（磁盘是唯一真相）；内置自动重试和 mtime 新鲜度门，避免残留产物蒙混提交。Pi 启动时显式加载仓库内受控 write extension，按阶段放行精确候选文件；每个 init attempt 结束后再用完整 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。`--mode json` 事件流驱动叙事先行预览（init 仅在 Phase 2 两个候选事件都到齐后发布，见 Player-visible Output 词条例外）。模型锁定 qwen-fp8。
 
 ### Turn Progress Registry（回合进度注册表）
 回合进行时的进程内单例（挂 globalThis——Next 构建会把模块复制进多个路由包，模块级 Map 会分裂成两份），PiRunner 发布"叙事/选项组合完成"相位，turn-preview 轮询接口读取，Orchestrator 回合终局清空。attempt 单调令牌防御迟到的异步发布（泄密守卫读盘跨越重试/终局时落地会推翻撤回或形成僵尸预览）；发布前的泄密守卫与提交校验同源。预览永远不是权威。
@@ -162,7 +162,7 @@ _Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输�
 _Avoid_: 让模型逐文件多次写盘、把 Bundle 当作新的故事状态源
 
 ### Init Workspace Bundle（初始化工作区包）
-`turn/state-update.md` 在 `task="init"` 时改为完整文件段：每段 `=== FILE: ... ===` 后是完整正文，必须恰好包含 `world.md`、`player.md`、`rules.md` 各一份及至少一张 `actors/*.md`。服务端先整体解析/校验路径、重复、空内容、占位与越权，再批量应用；无效 attempt 不得部分写入，重试耗尽不写 Done Marker。每个 Pi init attempt 还会对 Story Workspace 做完整文件/目录 manifest，除三个候选文件外任何新增、删除或改写都立即失败且不重试，由 Orchestrator 快照回滚。init 不使用 `APPEND/REPLACE` 或随机池。
+`turn/state-update.md` 在 init Phase 1 时改为完整文件段：每段 `=== FILE: ... ===` 后是完整正文，必须恰好包含 `world.md`、`player.md`、`rules.md` 各一份及至少一张 `actors/*.md`；每张 actor 还必须有独立的 Emotional Core、Relationship State、Emotionally Salient Memories、Current Intent 标题。服务端先整体解析/校验路径、重复、空内容、占位与越权，再批量应用；无效 attempt 不得部分写入，重试耗尽不写 Done Marker。Phase 2 从已应用概念文件构造只含 player 可见字段与 actor 标题/表面形象/voice 的 opening context，只允许 output/interaction。每个 Pi init attempt 还会对 Story Workspace 做完整文件/目录 manifest，按阶段 allowlist 比对；任何其他新增、删除或改写都立即失败且不重试，由 Orchestrator 快照回滚。init 不使用 `APPEND/REPLACE` 或随机池。
 
 ### Runner 切换（Runner Selection）
 Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `pi` / `claude`），默认 `fake`。`pi` 模式下 init 与 turn 共用同一个 PiRunner；`claude` 模式下按 Runner Task 分发：turn → Pi Runner，init → Claude Code Runner（A/B 基线，第一阶段保留）。单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用真实 runner，Pi 与 Claude 分别由覆盖文件选择。vitest 契约测试始终用 `fake`/`fake-pi`，不依赖真实 CLI/凭证/网络。
@@ -174,7 +174,7 @@ _Avoid_: 配置文件、运行时热切换、默认强制真实 agent、各 rout
 ## 回合状态相关
 
 ### Done Marker（运行成功标记）
-`turn/done.json` 文件，回合成功完成后写入——Pi Runner 的 init/turn 路径均由 Web 侧在校验并应用候选 Bundle 之后写入；Claude Code Runner（A/B 基线 init）仍由 agent 按 prompt 指令写入。Turn Orchestrator 以此文件的**磁盘存在性和状态**为权威依据判断回合是否成功，不依赖 runner 的返回值。回合开始前由 Orchestrator 清理。
+`turn/done.json` 文件，回合成功完成后写入——Pi Runner 的 turn 路径在校验回合候选后写入，init 路径在 Phase 1 Bundle 应用且 Phase 2 opening 候选校验通过后由 Web 侧写入；Claude Code Runner（A/B 基线 init）仍由 agent 按 prompt 指令写入。Turn Orchestrator 以此文件的**磁盘存在性和状态**为权威依据判断回合是否成功，不依赖 runner 的返回值。回合开始前由 Orchestrator 清理。
 init 契约（性能优化分支）要求 done.json **永远是最后一步**，写完立即结束（不复查不总结）；Claude Code Runner 的 done.json 看门狗（`CLAUDE_EARLY_EXIT=0` 可关）在其新鲜落盘且 status=success 时 SIGTERM 砍掉 post-done 尾巴——实测 claude 曾在 done.json 落盘后继续自查/返工数十秒。杀早了的内容缺陷由 orchestrator 既有校验链兜底（整轮回滚，fail-closed）。
 
 ### Turn Snapshot（回合快照）

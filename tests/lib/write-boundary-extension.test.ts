@@ -76,6 +76,8 @@ describe("Pi write-boundary extension", () => {
 
   it("registers a tool_call handler that blocks write before execution", async () => {
     const cwd = await makeWorkspace();
+    const previous = process.env.PI_WRITE_ALLOWED_PATHS;
+    process.env.PI_WRITE_ALLOWED_PATHS = "turn/output.md,turn/interaction.json,turn/state-update.md";
     let handler: PiToolCallHandler | undefined;
     const api = {
       on(event: "tool_call", callback: PiToolCallHandler) {
@@ -83,18 +85,54 @@ describe("Pi write-boundary extension", () => {
         handler = callback;
       },
     };
-    registerWriteBoundary(api);
-    expect(handler).toBeDefined();
+    try {
+      registerWriteBoundary(api);
+      expect(handler).toBeDefined();
 
-    await expect(
-      handler!({ toolName: "write", input: { path: "turn/output.md" } }, { cwd }),
-    ).resolves.toBeUndefined();
-    const blocked = await handler!(
-      { toolName: "write", input: { path: "../world.md" } },
-      { cwd },
-    );
-    expect(blocked?.block).toBe(true);
-    expect(blocked?.reason).toContain("path");
-    await expect(handler!({ toolName: "bash", input: { command: "echo nope" } }, { cwd })).resolves.toBeUndefined();
+      await expect(
+        handler!({ toolName: "write", input: { path: "turn/output.md" } }, { cwd }),
+      ).resolves.toBeUndefined();
+      const blocked = await handler!(
+        { toolName: "write", input: { path: "../world.md" } },
+        { cwd },
+      );
+      expect(blocked?.block).toBe(true);
+      expect(blocked?.reason).toContain("path");
+      await expect(handler!({ toolName: "bash", input: { command: "echo nope" } }, { cwd })).resolves.toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_WRITE_ALLOWED_PATHS;
+      else process.env.PI_WRITE_ALLOWED_PATHS = previous;
+    }
+  });
+
+  it("enforces phase-specific allowlists and fails closed when the allowlist is missing or illegal", async () => {
+    const cwd = await makeWorkspace();
+    const previous = process.env.PI_WRITE_ALLOWED_PATHS;
+    const register = () => {
+      let handler: PiToolCallHandler | undefined;
+      registerWriteBoundary({ on: (_event, callback) => { handler = callback; } });
+      return handler!;
+    };
+    try {
+      process.env.PI_WRITE_ALLOWED_PATHS = "turn/state-update.md";
+      const concepts = register();
+      await expect(concepts({ toolName: "write", input: { path: "turn/state-update.md" } }, { cwd })).resolves.toBeUndefined();
+      await expect(concepts({ toolName: "write", input: { path: "turn/output.md" } }, { cwd })).resolves.toMatchObject({ block: true });
+
+      process.env.PI_WRITE_ALLOWED_PATHS = "turn/output.md,turn/interaction.json";
+      const opening = register();
+      await expect(opening({ toolName: "write", input: { path: "turn/output.md" } }, { cwd })).resolves.toBeUndefined();
+      await expect(opening({ toolName: "write", input: { path: "turn/state-update.md" } }, { cwd })).resolves.toMatchObject({ block: true });
+
+      delete process.env.PI_WRITE_ALLOWED_PATHS;
+      const missing = register();
+      await expect(missing({ toolName: "write", input: { path: "turn/output.md" } }, { cwd })).resolves.toMatchObject({ block: true });
+      process.env.PI_WRITE_ALLOWED_PATHS = "turn/world.md";
+      const illegal = register();
+      await expect(illegal({ toolName: "write", input: { path: "turn/output.md" } }, { cwd })).resolves.toMatchObject({ block: true });
+    } finally {
+      if (previous === undefined) delete process.env.PI_WRITE_ALLOWED_PATHS;
+      else process.env.PI_WRITE_ALLOWED_PATHS = previous;
+    }
   });
 });

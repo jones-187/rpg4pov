@@ -25,6 +25,50 @@ function makeMockSpawn(result: SpawnResult): { spawn: SpawnFn; calls: CallRecord
 }
 
 describe("ClaudeCodeRunner", () => {
+  it("显式把 Claude CLI 模型硬锁为 qwen-fp8", async () => {
+    const saved = process.env.ANTHROPIC_MODEL;
+    process.env.ANTHROPIC_MODEL = "qwen-fp8";
+    try {
+      const meta = await createStory();
+      const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+      const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+      await runner.runTurn({
+        storyId: meta.storyId,
+        workspaceDir: resolveWorkspaceDir(meta.storyId),
+        playerInput: "测试",
+        signal: AbortSignal.timeout(5000),
+      });
+      const modelIndex = calls[0].args.indexOf("--model");
+      expect(calls[0].args[modelIndex + 1]).toBe("qwen-fp8");
+      expect(calls[0].opts.env?.ANTHROPIC_MODEL).toBe("qwen-fp8");
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_MODEL;
+      else process.env.ANTHROPIC_MODEL = saved;
+    }
+  });
+
+  it("拒绝为 Claude CLI 配置其他模型", async () => {
+    const saved = process.env.ANTHROPIC_MODEL;
+    process.env.ANTHROPIC_MODEL = "another-model";
+    try {
+      const meta = await createStory();
+      const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
+      const runner = new ClaudeCodeRunner({ spawnFn: spawn });
+      await expect(
+        runner.runTurn({
+          storyId: meta.storyId,
+          workspaceDir: resolveWorkspaceDir(meta.storyId),
+          playerInput: "测试",
+          signal: AbortSignal.timeout(5000),
+        }),
+      ).rejects.toThrow(/requires qwen-fp8/);
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_MODEL;
+      else process.env.ANTHROPIC_MODEL = saved;
+    }
+  });
+
   it("调用 claude -p --output-format json，cwd=workspaceDir", async () => {
     const meta = await createStory();
     const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });

@@ -4,9 +4,11 @@ import type { AgentRunner, TurnRequest, TurnResult } from "./agent-runner";
 import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./agent-spawn";
 import { ensurePiConfig, resolvePiModel } from "./pi-config";
 import {
-  PI_INIT_SYSTEM_PROMPT,
+  PI_INIT_CONCEPTS_SYSTEM_PROMPT,
+  PI_INIT_OPENING_SYSTEM_PROMPT,
   PI_TURN_SYSTEM_PROMPT,
-  buildInitUserPrompt,
+  buildInitConceptsUserPrompt,
+  buildInitOpeningUserPrompt,
   buildTurnUserPrompt,
 } from "./pi-prompt";
 import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
@@ -30,8 +32,8 @@ import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
  *
  * 执行模型（与 ClaudeCodeRunner 的 agent 自主读写不同）：
  * 1. 服务端预注入全部上下文（pi-prompt.ts），模型禁止读文件
- * 2. pi 单进程执行，模型并行写 3 个产物：output.md / interaction.json /
- *    state-update.md（状态变更合并单文件）
+ * 2. turn 由 pi 并行写 3 个产物；init 分为概念 Bundle 与 opening 两阶段，
+ *    两阶段各有独立写白名单，避免开场叙事读取/泄漏隐藏设定。
  * 3. 服务端后处理：解析合并 state-update → 随机判定申报落账 → 写 done.json
  *    （磁盘权威不变，由 Web 侧而非模型写入）→ orchestrator 走既有的校验/提交/回滚链路
  *
@@ -51,12 +53,15 @@ const SIGKILL_GRACE_MS = 5_000;
 const ROLL_POOL_SIZE = 6;
 /** 早退看门狗轮询间隔 */
 const WATCH_INTERVAL_MS = 200;
-/** Init agent may only mutate these three candidate artifacts. */
-const INIT_ALLOWED_ARTIFACTS = [
+/** Candidate artifact paths for each execution plan. */
+const TURN_ALLOWED_ARTIFACTS = [
   "turn/output.md",
   "turn/interaction.json",
   "turn/state-update.md",
 ] as const;
+const INIT_CONCEPT_ALLOWED_ARTIFACTS = ["turn/state-update.md"] as const;
+const INIT_OPENING_ALLOWED_ARTIFACTS = ["turn/output.md", "turn/interaction.json"] as const;
+type PiPhase = "turn" | "init-concepts" | "init-opening";
 const DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH = path.resolve(
   process.cwd(),
   "pi-extensions/write-boundary.ts",
@@ -65,9 +70,12 @@ const DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH = path.resolve(
 /** 从 process.env 传递给 pi 的白名单（models.json 已含密钥，不传 token） */
 const PI_ENV_WHITELIST = ["PATH", "HOME", "NODE_ENV", "TMPDIR"];
 
-function buildPiEnv(): Record<string, string | undefined> {
+function buildPiEnv(allowedPaths: readonly string[]): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const key of PI_ENV_WHITELIST) env[key] = process.env[key];
+  // This value is runner-owned. The model cannot widen the phase allowlist
+  // through prompt text or by inheriting the parent process environment.
+  env.PI_WRITE_ALLOWED_PATHS = allowedPaths.join(",");
   return env;
 }
 
@@ -162,26 +170,44 @@ async function freshFileOk(
   baseline: number | null,
   validate: (raw: string) => boolean,
 ): Promise<boolean> {
+  return (await readFreshFile(file, baseline, validate)) !== null;
+}
+
+async function readFreshFile(
+  file: string,
+  baseline: number | null,
+  validate: (raw: string) => boolean,
+): Promise<string | null> {
   try {
     const stat = await fs.stat(file);
     // 新鲜度 = 严格新于 attempt 前基线（fs 时间戳对 fs 时间戳，规避
     // WSL2 下 mtime 滞后 Date.now() 数毫秒的时钟偏差）；基线 null = 原
     // 本不存在，任何落盘都算新。防止上一 attempt 残留触发误杀。
-    if (baseline !== null && stat.mtimeMs <= baseline) return false;
+    if (baseline !== null && stat.mtimeMs <= baseline) return null;
     const raw = await fs.readFile(file, "utf8");
-    return raw.trim() !== "" && validate(raw);
+    return raw.trim() !== "" && validate(raw) ? raw : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-/** 三产物齐且形状合法（撕裂写防御）：output 首行契约 + interaction 可解析。 */
+/** 根据执行阶段检查早退所需的候选产物（撕裂写防御）。 */
 async function turnArtifactsComplete(
   workspaceDir: string,
   baselines: ArtifactMtimes,
-  task: "turn" | "init" = "turn",
+  phase: PiPhase = "turn",
 ): Promise<boolean> {
   const turnDir = path.join(workspaceDir, "turn");
+  if (phase === "init-concepts") {
+    return freshFileOk(
+      path.join(turnDir, "state-update.md"),
+      baselines.stateUpdate,
+      (raw) => parseInitWorkspaceBundle(raw).ok,
+    );
+  }
+  if (phase === "init-opening") {
+    return (await validateInitOpeningArtifacts(workspaceDir, baselines)).ok;
+  }
   const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
     const first = raw.split("\n").find((l) => l.trim() !== "");
     return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
@@ -200,9 +226,7 @@ async function turnArtifactsComplete(
     },
   );
   if (!interactionOk) return false;
-  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, (raw) =>
-    task === "init" ? parseInitWorkspaceBundle(raw).ok : true,
-  );
+  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, () => true);
 }
 
 /** mtime 严格新于基线；基线 null（attempt 前不存在）时任何存在都算新 */
@@ -215,7 +239,8 @@ async function mtimeFresherThan(file: string, baseline: number | null): Promise<
   }
 }
 
-/** 成功路径新鲜度门：output（首行契约+非占位）与 interaction（可解析）均新于基线 */
+/** 成功路径新鲜度门：output（首行契约+非占位）与 interaction（可解析）均新于基线。
+ * 普通 turn 的 interaction 兼容既有降级语义；init Phase 2 另走严格校验。 */
 async function turnCoreArtifactsFresh(
   workspaceDir: string,
   baselines: ArtifactMtimes,
@@ -236,6 +261,46 @@ async function turnCoreArtifactsFresh(
   });
 }
 
+interface InitOpeningValidation {
+  ok: boolean;
+  problem?: string;
+}
+
+/**
+ * Init Phase 2's final candidate gate. Both files must be fresh, interaction
+ * must survive the public schema sanitizer, and output must pass the same
+ * leak/shape validator used by Orchestrator before a Done Marker is written.
+ */
+async function validateInitOpeningArtifacts(
+  workspaceDir: string,
+  baselines: ArtifactMtimes,
+): Promise<InitOpeningValidation> {
+  const turnDir = path.join(workspaceDir, "turn");
+  const output = await readFreshFile(path.join(turnDir, "output.md"), baselines.output, (raw) => {
+    const first = raw.split("\n").find((line) => line.trim() !== "");
+    return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
+  });
+  if (output === null) return { ok: false, problem: "opening output missing, stale, or malformed" };
+
+  const interactionRaw = await readFreshFile(
+    path.join(turnDir, "interaction.json"),
+    baselines.interaction,
+    (raw) => {
+      try {
+        return sanitizeTurnInteraction(JSON.parse(raw)) !== null;
+      } catch {
+        return false;
+      }
+    },
+  );
+  if (interactionRaw === null) {
+    return { ok: false, problem: "opening interaction missing, stale, or invalid" };
+  }
+
+  const problem = validateTurnOutput(output, [], buildInteractionFingerprints(interactionRaw));
+  return problem ? { ok: false, problem } : { ok: true };
+}
+
 /**
  * 早退看门狗：三产物落盘并校验通过即 SIGTERM pi，砍掉第二次 LLM 往返
  * （实测那趟只为输出"回合完成"23 token，却要 prefill 4.3k fresh + 整套
@@ -247,14 +312,114 @@ function startEarlyExitWatcher(
   spawnOpts: SpawnOpts,
   workspaceDir: string,
   baselines: ArtifactMtimes,
-  task: "turn" | "init",
+  phase: PiPhase,
 ): PollWatchHandle {
   return startPollWatcher(
     WATCH_INTERVAL_MS,
-    () => turnArtifactsComplete(workspaceDir, baselines, task),
+    () => turnArtifactsComplete(workspaceDir, baselines, phase),
     () => spawnOpts._child?.kill("SIGTERM"),
     earlyExitEnabled(),
   );
+}
+
+interface PiAttemptResult {
+  result?: SpawnResult;
+  spawnError?: unknown;
+  watcherFired: boolean;
+  unauthorized?: string;
+  manifestError?: unknown;
+  artifactBaselines: ArtifactMtimes;
+}
+
+/** Run one phase attempt and perform the post-spawn manifest check first. */
+async function executePiAttempt(input: {
+  req: TurnRequest;
+  spawnFn: SpawnFn;
+  piPath: string;
+  args: string[];
+  phase: PiPhase;
+  allowedPaths: readonly string[];
+  token: number;
+}): Promise<PiAttemptResult> {
+  const { req, spawnFn, piPath, args, phase, allowedPaths, token } = input;
+  const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
+  let manifestBefore: WorkspaceManifest | undefined;
+  if (phase !== "turn") {
+    try {
+      manifestBefore = await captureWorkspaceManifest(req.workspaceDir);
+    } catch (err) {
+      return { artifactBaselines, watcherFired: false, manifestError: err };
+    }
+  }
+
+  const spawnOpts: SpawnOpts = {
+    cwd: req.workspaceDir,
+    env: buildPiEnv(allowedPaths),
+    signal: req.signal,
+    stdinData: "",
+    stdio: ["pipe", "pipe", "pipe"],
+    onStdoutLine: makePiEventHandler(req, token, phase),
+  };
+  let clearKillTimer: (() => void) | undefined;
+  const onAbort = () => {
+    clearKillTimer = killChildGradual(spawnOpts._child);
+  };
+  req.signal.addEventListener("abort", onAbort);
+  const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, phase);
+
+  let result: SpawnResult | undefined;
+  let spawnError: unknown;
+  try {
+    result = await spawnFn(piPath, args, spawnOpts);
+  } catch (err) {
+    spawnError = err;
+  } finally {
+    clearKillTimer?.();
+    watcher.stop();
+    req.signal.removeEventListener("abort", onAbort);
+  }
+
+  let unauthorized: string | undefined;
+  let manifestError: unknown;
+  if (manifestBefore) {
+    try {
+      const manifestAfter = await captureWorkspaceManifest(req.workspaceDir);
+      unauthorized = findUnauthorizedWorkspaceChange(manifestBefore, manifestAfter, allowedPaths) ?? undefined;
+    } catch (err) {
+      manifestError = err;
+    }
+  }
+  return {
+    result,
+    spawnError,
+    watcherFired: watcher.fired,
+    unauthorized,
+    manifestError,
+    artifactBaselines,
+  };
+}
+
+function buildPiArgs(
+  extensionPath: string,
+  systemPrompt: string,
+  userPrompt: string,
+): string[] {
+  return [
+    "-p",
+    "--no-session",
+    "--mode",
+    "json",
+    "--model",
+    resolvePiModel(),
+    "--tools",
+    "write",
+    "--no-extensions",
+    "--extension",
+    extensionPath,
+    "--system-prompt",
+    systemPrompt,
+    userPrompt,
+  ];
 }
 
 export class PiRunner implements AgentRunner {
@@ -280,35 +445,16 @@ export class PiRunner implements AgentRunner {
     }
     await ensurePiConfig();
     const task = req.task ?? "turn";
-    // Init has no random pool. The same runner still owns both execution
-    // plans; only the prompt, artifact contract, and post-processing differ.
-    const rollPool = task === "init" ? [] : generateRollPool(ROLL_POOL_SIZE, this.rollRng);
-    const userPrompt =
-      task === "init"
-        ? await buildInitUserPrompt(req.workspaceDir, req.playerInput)
-        : await buildTurnUserPrompt(req.workspaceDir, req.storyId, req.playerInput, rollPool);
+    if (task === "init") return this.runInitPhases(req, writeBoundaryExtensionPath);
 
-    const args = [
-      "-p",
-      "--no-session",
-      // json 事件流：toolcall_end 携带 write 参数原文，"叙事组合完成"时点
-      // （实测全程 84% 处）先于进程退出暴露给前端（叙事先行显示）
-      "--mode",
-      "json",
-      "--model",
-      resolvePiModel(),
-      // 工具面收窄到 write：契约本就禁止读/bash，列表里不存在比措辞约束更硬
-      "--tools",
-      "write",
-      // Extension loading is explicit even with the default extension set
-      // disabled: the boundary runs before each write tool execution.
-      "--no-extensions",
-      "--extension",
-      writeBoundaryExtensionPath,
-      "--system-prompt",
-      task === "init" ? PI_INIT_SYSTEM_PROMPT : PI_TURN_SYSTEM_PROMPT,
-      userPrompt,
-    ];
+    const rollPool = generateRollPool(ROLL_POOL_SIZE, this.rollRng);
+    const userPrompt = await buildTurnUserPrompt(
+      req.workspaceDir,
+      req.storyId,
+      req.playerInput,
+      rollPool,
+    );
+    const args = buildPiArgs(writeBoundaryExtensionPath, PI_TURN_SYSTEM_PROMPT, userPrompt);
 
     const diagnostics: string[] = [];
     const maxAttempts = resolveMaxAttempts();
@@ -320,77 +466,18 @@ export class PiRunner implements AgentRunner {
       // 的异步发布（泄密守卫读盘期间跨越了重试/终局）凭旧令牌被丢弃
       const attemptToken = beginTurnAttempt(req.storyId);
 
-      const spawnOpts: SpawnOpts = {
-        cwd: req.workspaceDir,
-        env: buildPiEnv(),
-        signal: req.signal,
-        stdinData: "",
-        stdio: ["pipe", "pipe", "pipe"],
-        onStdoutLine: makePiEventHandler(req, attemptToken, task),
-      };
-      let clearKillTimer: (() => void) | undefined;
-      const onAbort = () => {
-        clearKillTimer = killChildGradual(spawnOpts._child);
-      };
-      req.signal.addEventListener("abort", onAbort);
-      const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
-      let initManifestBefore: WorkspaceManifest | undefined;
-      if (task === "init") {
-        try {
-          initManifestBefore = await captureWorkspaceManifest(req.workspaceDir);
-        } catch (err) {
-          req.signal.removeEventListener("abort", onAbort);
-          return {
-            success: false,
-            error: "pi init workspace manifest failed",
-            detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
-          };
-        }
-      }
-      const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, task);
+      const attemptResult = await executePiAttempt({
+        req,
+        spawnFn: this.spawnFn,
+        piPath: this.piPath,
+        args,
+        phase: "turn",
+        allowedPaths: TURN_ALLOWED_ARTIFACTS,
+        token: attemptToken,
+      });
+      const { result, spawnError, watcherFired } = attemptResult;
 
-      let result: SpawnResult | undefined;
-      let spawnError: unknown = null;
-      try {
-        result = await this.spawnFn(this.piPath, args, spawnOpts);
-      } catch (err) {
-        // Keep the post-spawn manifest check ahead of exit/error handling: a
-        // child may have written outside the init boundary before failing.
-        spawnError = err;
-      } finally {
-        clearKillTimer?.();
-      }
-      watcher.stop();
-      req.signal.removeEventListener("abort", onAbort);
-
-      if (task === "init" && initManifestBefore) {
-        let initManifestAfter: WorkspaceManifest;
-        try {
-          initManifestAfter = await captureWorkspaceManifest(req.workspaceDir);
-        } catch (err) {
-          return {
-            success: false,
-            error: "pi init workspace manifest failed",
-            detail: `attempt ${attempt}: ${sanitizeForLog(
-              err instanceof Error ? err.message : String(err),
-            )}`,
-          };
-        }
-        const unauthorized = findUnauthorizedWorkspaceChange(
-          initManifestBefore,
-          initManifestAfter,
-          INIT_ALLOWED_ARTIFACTS,
-        );
-        if (unauthorized) {
-          return {
-            success: false,
-            error: "pi init workspace write boundary violated",
-            detail: `attempt ${attempt}: ${unauthorized}`,
-          };
-        }
-      }
-
-      if (spawnError !== null) {
+      if (spawnError !== undefined) {
         return {
           success: false,
           error: "pi runner crashed",
@@ -404,13 +491,13 @@ export class PiRunner implements AgentRunner {
       if (result.aborted || req.signal.aborted) {
         return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
       }
-      if (result.code !== 0 && !watcher.fired) {
+      if (result.code !== 0 && !watcherFired) {
         diagnostics.push(
           `attempt ${attempt}: pi exit=${result.code}\n${sanitizeForLog(result.stdout + "\n" + result.stderr).slice(0, 2000)}`,
         );
         continue;
       }
-      if (watcher.fired) {
+      if (watcherFired) {
         diagnostics.push(`attempt ${attempt}: early-exit fired (artifacts complete, skip final round-trip)`);
       }
 
@@ -420,7 +507,7 @@ export class PiRunner implements AgentRunner {
       // output/interaction 必须新于 attempt 前基线；早退看门狗 fire 过的
       // 天然新鲜，自然退出的在此复验。state-update 不设硬门（契约容许
       // 降级缺席），但旧文件不得重放——下方合并步骤单独校验。
-      if (!watcher.fired && !(await turnCoreArtifactsFresh(req.workspaceDir, artifactBaselines))) {
+      if (!watcherFired && !(await turnCoreArtifactsFresh(req.workspaceDir, attemptResult.artifactBaselines))) {
         diagnostics.push(
           `attempt ${attempt}: pi exit=${result.code} but turn artifacts stale/missing (dictation flake?)`,
         );
@@ -436,53 +523,15 @@ export class PiRunner implements AgentRunner {
         continue;
       }
 
-      if (task === "init") {
-        // Init state-update is a complete workspace bundle, not the turn
-        // APPEND/REPLACE delta format. It is validated in full before any
-        // conceptual file is touched; invalid attempts are retried.
-        const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
-        if (!(await mtimeFresherThan(stateUpdatePath, artifactBaselines.stateUpdate))) {
-          diagnostics.push(`attempt ${attempt}: init bundle missing or stale`);
-          continue;
-        }
-        let rawBundle: string;
-        try {
-          rawBundle = await fs.readFile(stateUpdatePath, "utf8");
-        } catch {
-          diagnostics.push(`attempt ${attempt}: init bundle read failed`);
-          continue;
-        }
-        const parsedBundle = parseInitWorkspaceBundle(rawBundle);
-        if (!parsedBundle.ok) {
-          diagnostics.push(`attempt ${attempt}: ${parsedBundle.error}`);
-          continue;
-        }
-        try {
-          await applyInitWorkspaceBundle(req.workspaceDir, parsedBundle.files);
-        } catch (err) {
-          const detail = sanitizeForLog(err instanceof Error ? err.message : String(err));
-          // A valid bundle can still fail during the filesystem commit (for
-          // example, a target path became a directory). Applying it may have
-          // touched some conceptual files already, so never retry against the
-          // same workspace. The orchestrator owns the snapshot rollback.
-          return {
-            success: false,
-            error: "pi init bundle apply failed",
-            detail: `attempt ${attempt}: init bundle apply failed: ${detail}`,
-          };
-        }
-        await writeDoneMarker(req.workspaceDir);
-        const notes: string[] = [];
-        if (watcher.fired) notes.push("early-exit fired (skipped final round-trip)");
-        return { success: true, detail: notes.length > 0 ? notes.join("; ") : undefined };
-      }
-
       // 成功：合并状态更新 + 落账随机判定（均降级不致命）→ 服务端写 done.json
       const mergeDiags: string[] = [];
       let rolls: RollDeclaration[] = [];
       try {
         const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
-        const stateFresh = await mtimeFresherThan(stateUpdatePath, artifactBaselines.stateUpdate);
+        const stateFresh = await mtimeFresherThan(
+          stateUpdatePath,
+          attemptResult.artifactBaselines.stateUpdate,
+        );
         if (!stateFresh) {
           // 缺席（容许，降级）或残留旧文件（禁止重放——旧状态重复 APPEND
           // 会污染状态文件）。两种情况都跳过合并，只记诊断。
@@ -501,7 +550,7 @@ export class PiRunner implements AgentRunner {
       mergeDiags.push(...(await recordRollDeclarations(req, rollPool, rolls)));
       await writeDoneMarker(req.workspaceDir);
       const notes: string[] = [];
-      if (watcher.fired) notes.push("early-exit fired (skipped final round-trip)");
+      if (watcherFired) notes.push("early-exit fired (skipped final round-trip)");
       if (mergeDiags.length > 0) notes.push(`state-update notes: ${mergeDiags.join("; ").slice(0, 2000)}`);
       return {
         success: true,
@@ -509,11 +558,191 @@ export class PiRunner implements AgentRunner {
       };
     }
 
-    const missingArtifact = task === "init" ? "init artifact/bundle" : "turn output";
     return {
       success: false,
-      error: `pi produced no ${missingArtifact} after ${maxAttempts} attempt(s)`,
+      error: `pi produced no turn output after ${maxAttempts} attempt(s)`,
       detail: sanitizeForLog(diagnostics.join("\n---\n")).slice(0, 4000),
+    };
+  }
+
+  private async runInitPhases(req: TurnRequest, extensionPath: string): Promise<TurnResult> {
+    const maxAttempts = resolveMaxAttempts();
+    const diagnostics: string[] = [];
+    const conceptsPrompt = await buildInitConceptsUserPrompt(req.workspaceDir, req.playerInput);
+    const conceptsArgs = buildPiArgs(
+      extensionPath,
+      PI_INIT_CONCEPTS_SYSTEM_PROMPT,
+      conceptsPrompt,
+    );
+
+    let conceptsApplied = false;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      req.signal.throwIfAborted();
+      const token = beginTurnAttempt(req.storyId);
+      const attemptResult = await executePiAttempt({
+        req,
+        spawnFn: this.spawnFn,
+        piPath: this.piPath,
+        args: conceptsArgs,
+        phase: "init-concepts",
+        allowedPaths: INIT_CONCEPT_ALLOWED_ARTIFACTS,
+        token,
+      });
+      const { result, spawnError, watcherFired } = attemptResult;
+
+      if (attemptResult.manifestError) {
+        return {
+          success: false,
+          error: "pi init workspace manifest failed",
+          detail: `phase 1 attempt ${attempt}: ${sanitizeForLog(
+            attemptResult.manifestError instanceof Error
+              ? attemptResult.manifestError.message
+              : String(attemptResult.manifestError),
+          )}`,
+        };
+      }
+      if (attemptResult.unauthorized) {
+        return {
+          success: false,
+          error: "pi init workspace write boundary violated",
+          detail: `phase 1 attempt ${attempt}: ${attemptResult.unauthorized}`,
+        };
+      }
+      if (spawnError !== undefined) {
+        return {
+          success: false,
+          error: "pi runner crashed",
+          detail: sanitizeForLog(spawnError instanceof Error ? spawnError.message : String(spawnError)),
+        };
+      }
+      if (!result) return { success: false, error: "pi runner crashed", detail: "spawn returned no result" };
+      if (result.aborted || req.signal.aborted) {
+        return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
+      }
+      if (result.code !== 0 && !watcherFired) {
+        diagnostics.push(
+          `phase 1 attempt ${attempt}: pi exit=${result.code}\n${sanitizeForLog(result.stdout + "\n" + result.stderr).slice(0, 2000)}`,
+        );
+        continue;
+      }
+      if (!watcherFired && !(await turnArtifactsComplete(req.workspaceDir, attemptResult.artifactBaselines, "init-concepts"))) {
+        diagnostics.push(`phase 1 attempt ${attempt}: init bundle missing or stale`);
+        continue;
+      }
+
+      const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
+      let rawBundle: string;
+      try {
+        rawBundle = await fs.readFile(stateUpdatePath, "utf8");
+      } catch {
+        diagnostics.push(`phase 1 attempt ${attempt}: init bundle read failed`);
+        continue;
+      }
+      const parsedBundle = parseInitWorkspaceBundle(rawBundle);
+      if (!parsedBundle.ok) {
+        diagnostics.push(`phase 1 attempt ${attempt}: ${parsedBundle.error}`);
+        continue;
+      }
+      try {
+        await applyInitWorkspaceBundle(req.workspaceDir, parsedBundle.files);
+      } catch (err) {
+        const detail = sanitizeForLog(err instanceof Error ? err.message : String(err));
+        return {
+          success: false,
+          error: "pi init bundle apply failed",
+          detail: `phase 1 attempt ${attempt}: init bundle apply failed: ${detail}`,
+        };
+      }
+      conceptsApplied = true;
+      break;
+    }
+
+    if (!conceptsApplied) {
+      return {
+        success: false,
+        error: `pi produced no init concepts after ${maxAttempts} attempt(s)`,
+        detail: sanitizeForLog(diagnostics.join("\n---\n")).slice(0, 4000),
+      };
+    }
+
+    req.signal.throwIfAborted();
+    const openingPrompt = await buildInitOpeningUserPrompt(req.workspaceDir);
+    const openingArgs = buildPiArgs(
+      extensionPath,
+      PI_INIT_OPENING_SYSTEM_PROMPT,
+      openingPrompt,
+    );
+    const openingDiagnostics: string[] = [];
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      req.signal.throwIfAborted();
+      const token = beginTurnAttempt(req.storyId);
+      const attemptResult = await executePiAttempt({
+        req,
+        spawnFn: this.spawnFn,
+        piPath: this.piPath,
+        args: openingArgs,
+        phase: "init-opening",
+        allowedPaths: INIT_OPENING_ALLOWED_ARTIFACTS,
+        token,
+      });
+      const { result, spawnError, watcherFired } = attemptResult;
+
+      if (attemptResult.manifestError) {
+        return {
+          success: false,
+          error: "pi init workspace manifest failed",
+          detail: `phase 2 attempt ${attempt}: ${sanitizeForLog(
+            attemptResult.manifestError instanceof Error
+              ? attemptResult.manifestError.message
+              : String(attemptResult.manifestError),
+          )}`,
+        };
+      }
+      if (attemptResult.unauthorized) {
+        return {
+          success: false,
+          error: "pi init workspace write boundary violated",
+          detail: `phase 2 attempt ${attempt}: ${attemptResult.unauthorized}`,
+        };
+      }
+      if (spawnError !== undefined) {
+        return {
+          success: false,
+          error: "pi runner crashed",
+          detail: sanitizeForLog(spawnError instanceof Error ? spawnError.message : String(spawnError)),
+        };
+      }
+      if (!result) return { success: false, error: "pi runner crashed", detail: "spawn returned no result" };
+      if (result.aborted || req.signal.aborted) {
+        return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
+      }
+      if (result.code !== 0 && !watcherFired) {
+        openingDiagnostics.push(
+          `phase 2 attempt ${attempt}: pi exit=${result.code}\n${sanitizeForLog(result.stdout + "\n" + result.stderr).slice(0, 2000)}`,
+        );
+        continue;
+      }
+      const openingValidation = await validateInitOpeningArtifacts(
+        req.workspaceDir,
+        attemptResult.artifactBaselines,
+      );
+      if (!openingValidation.ok) {
+        openingDiagnostics.push(
+          `phase 2 attempt ${attempt}: ${openingValidation.problem ?? "opening artifacts invalid"}`,
+        );
+        continue;
+      }
+      await writeDoneMarker(req.workspaceDir);
+      return {
+        success: true,
+        detail: watcherFired ? "phase 2 early-exit fired (skipped final round-trip)" : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      error: `pi produced no init opening after ${maxAttempts} attempt(s)`,
+      detail: sanitizeForLog(openingDiagnostics.join("\n---\n")).slice(0, 4000),
     };
   }
 }
@@ -570,14 +799,19 @@ interface PiToolCallBlock {
 /**
  * pi --mode json 事件流 → 叙事先行预览。
  * 只消费 toolcall_end（write 参数组合完成，早于磁盘写与服务端收尾）：
- * turn 的 output.md 就绪即发布叙事；init 等本 attempt 的 output 与
- * interaction 都就绪后再用后者做泄密指纹。交互建议始终先净化再发布。预览只是提前显示，
+ * turn 的 output.md 就绪即发布叙事；init Phase 2 等本 attempt 的 output 与
+ * interaction 都就绪后再用后者做泄密指纹，Phase 1 不发布预览。交互建议始终先净化再发布。预览只是提前显示，
  * 权威仍是磁盘产物 + orchestrator 校验链。token 为 attempt 令牌——
  * 迟到发布（跨越重试/终局）由 turn-progress 丢弃。
  */
-function makePiEventHandler(req: TurnRequest, token: number, task: "turn" | "init"): (line: string) => void {
+function makePiEventHandler(req: TurnRequest, token: number, phase: PiPhase): (line: string) => void {
+  // Concept generation is still untrusted until the complete bundle has been
+  // parsed and applied.  Do not let its tool-call stream enter the ordinary
+  // turn preview side-channel, even if it mentions candidate opening files.
+  if (phase === "init-concepts") return () => {};
+
   const initPreview: { output?: string; interactionFingerprints?: string[] } | undefined =
-    task === "init" ? {} : undefined;
+    phase === "init-opening" ? {} : undefined;
 
   return (line) => {
     let ev: {

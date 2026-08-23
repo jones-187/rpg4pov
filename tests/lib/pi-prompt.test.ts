@@ -3,13 +3,22 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   buildInitUserPrompt,
+  buildInitConceptsUserPrompt,
+  buildInitOpeningUserPrompt,
   buildTurnUserPrompt,
+  PI_INIT_CONCEPTS_SYSTEM_PROMPT,
+  PI_INIT_OPENING_SYSTEM_PROMPT,
   PI_INIT_SYSTEM_PROMPT,
   PI_TURN_SYSTEM_PROMPT,
   resolveHistoryLimit,
   resolveActorBudgetBytes,
 } from "@/lib/pi-prompt";
-import { buildPiModelsJson, ensurePiConfig, resolvePiAgentDir } from "@/lib/pi-config";
+import {
+  buildPiModelsJson,
+  ensurePiConfig,
+  resolvePiAgentDir,
+  resolvePiModel,
+} from "@/lib/pi-config";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
@@ -129,6 +138,68 @@ describe("PI_INIT_SYSTEM_PROMPT", () => {
     const prompt = await buildInitUserPrompt(resolveWorkspaceDir(meta.storyId), canon);
     expect(prompt).toContain(canon);
   });
+
+  it("Phase 1 只要求完整 Bundle 候选，不要求 output/interaction", () => {
+    expect(PI_INIT_CONCEPTS_SYSTEM_PROMPT).toContain("Phase 1");
+    expect(PI_INIT_CONCEPTS_SYSTEM_PROMPT).toContain("turn/state-update.md");
+    expect(PI_INIT_CONCEPTS_SYSTEM_PROMPT).toContain("不能写 turn/output.md");
+    expect(PI_INIT_CONCEPTS_SYSTEM_PROMPT).toContain("不能写 turn/interaction.json");
+    expect(PI_INIT_CONCEPTS_SYSTEM_PROMPT).toContain("Emotionally Salient Memories");
+  });
+
+  it("Phase 2 opening prompt 只面向主角可见信息和 actor 表面/voice", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.writeFile(
+      path.join(dir, "player.md"),
+      "# 主角\n\n## 初始状态\n站在门口。\n\n## 主角已知信息\n灯快熄了。\n\n## Protagonist Core\n声音克制。\n\n## Player Agency\n重大决定交还玩家。\n\n## 用户设定\n原始秘密设定不应注入。",
+    );
+    await fs.writeFile(
+      path.join(dir, "world.md"),
+      "# 世界\n\nGod State：地下有会唱歌的钥匙。",
+    );
+    await fs.writeFile(
+      path.join(dir, "actors", "keeper.md"),
+      "# 守塔人\n\n## 表面形象\n穿旧雨衣。\n\n## voice\n短句，少解释。\n\n## 私有记忆\n他记得主角的秘密。\n\n## Emotional Core\ncoreNeed: 被需要。\n\n## Relationship State: 主角\nsurfaceRelationship: 学徒。\n\n## Current Intent\nhiddenIntent: 试探。",
+    );
+
+    const prompt = await buildInitOpeningUserPrompt(dir);
+    expect(prompt).toContain("站在门口");
+    expect(prompt).toContain("灯快熄了");
+    expect(prompt).toContain("声音克制");
+    expect(prompt).toContain("重大决定交还玩家");
+    expect(prompt).toContain("守塔人");
+    expect(prompt).toContain("穿旧雨衣");
+    expect(prompt).toContain("短句，少解释");
+    expect(prompt).not.toContain("原始秘密设定不应注入");
+    expect(prompt).not.toContain("God State");
+    expect(prompt).not.toContain("地下有会唱歌的钥匙");
+    expect(prompt).not.toContain("他记得主角的秘密");
+    expect(prompt).not.toContain("hiddenIntent");
+    expect(prompt).not.toContain("试探");
+  });
+
+  it("actor 没有独立 voice 标题时只从 Current Intent 提取 voice", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    await fs.writeFile(
+      path.join(dir, "actors", "keeper.md"),
+      "# 守塔人\n\n## 表面形象\n穿旧雨衣。\n\n## Current Intent\n- voice: 短句，答一半。\n- hiddenIntent: 试探主角是否知道地下秘密。\n- privateMemory: 他曾在雾里失踪。",
+    );
+
+    const prompt = await buildInitOpeningUserPrompt(dir);
+    expect(prompt).toContain("短句，答一半");
+    expect(prompt).not.toContain("试探主角是否知道地下秘密");
+    expect(prompt).not.toContain("他曾在雾里失踪");
+  });
+
+  it("Phase 2 system prompt 只允许 output/interaction，禁止 state-update", () => {
+    expect(PI_INIT_OPENING_SYSTEM_PROMPT).toContain("Phase 2");
+    expect(PI_INIT_OPENING_SYSTEM_PROMPT).toContain("turn/output.md");
+    expect(PI_INIT_OPENING_SYSTEM_PROMPT).toContain("turn/interaction.json");
+    expect(PI_INIT_OPENING_SYSTEM_PROMPT).toContain("不能写 turn/state-update.md");
+    expect(PI_INIT_OPENING_SYSTEM_PROMPT).not.toContain("=== FILE: world.md ===");
+  });
 });
 
 describe("buildTurnUserPrompt", () => {
@@ -244,6 +315,17 @@ describe("buildTurnUserPrompt", () => {
 });
 
 describe("pi-config", () => {
+  it("拒绝 qwen-fp8 之外的模型配置", () => {
+    const saved = process.env.ANTHROPIC_MODEL;
+    process.env.ANTHROPIC_MODEL = "another-model";
+    try {
+      expect(() => resolvePiModel()).toThrow(/requires qwen-fp8/);
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_MODEL;
+      else process.env.ANTHROPIC_MODEL = saved;
+    }
+  });
+
   it("models.json 从环境推导且幂等", async () => {
     const home = await fs.mkdtemp(path.join(process.env.TMPDIR || "/tmp", "pi-cfg-"));
     const saved = {

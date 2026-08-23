@@ -7,6 +7,7 @@ import { readInitSkeletonContext } from "./init-context";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
 import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
+import { resolveAgentModel } from "./agent-model";
 
 /** 默认 prompt 选择：task=init 用初始化模板（预注入骨架文件），否则回合模板 */
 async function defaultPromptTemplate(
@@ -31,10 +32,6 @@ const ENV_WHITELIST = [
   // 第三方 API 兼容（如 OpenRouter、Azure、自建代理）
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_MODEL",
-  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-  "ANTHROPIC_DEFAULT_OPUS_MODEL",
-  "ANTHROPIC_DEFAULT_SONNET_MODEL",
   // 系统环境
   "PATH",
   "HOME",
@@ -130,6 +127,8 @@ export class ClaudeCodeRunner implements AgentRunner {
 
       const args = [
         "-p", // 非交互模式，从 stdin 读取 prompt
+        "--model",
+        resolveAgentModel(),
         "--output-format",
         "json",
         // 权限治理（性能优化分支实测修正：Issue 14 的 settings 路径规则
@@ -260,5 +259,5 @@ function buildEnvWhitelist(): Record<string, string | undefined> {
   for (const key of ENV_WHITELIST) {
     env[key] = process.env[key];
   }
-  return { ...env, ...RUNNER_FIXED_ENV };
+  return { ...env, ...RUNNER_FIXED_ENV, ANTHROPIC_MODEL: resolveAgentModel() };
 }

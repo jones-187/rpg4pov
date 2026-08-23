@@ -1,11 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-const ALLOWED_WRITE_PATHS = new Set([
+const ALL_WRITE_PATHS = [
   "turn/output.md",
   "turn/interaction.json",
   "turn/state-update.md",
-]);
+] as const;
+const ALL_WRITE_PATHS_SET = new Set<string>(ALL_WRITE_PATHS);
 
 export type PiWriteBoundaryDecision =
   | { allowed: true }
@@ -31,6 +32,20 @@ export interface PiExtensionApi {
 }
 
 /**
+ * Parse the runner-injected phase allowlist. The extension deliberately has
+ * no permissive default: a Pi child must receive a known, non-empty list.
+ */
+export function parsePiWriteAllowlist(raw: unknown): readonly string[] | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const paths = raw.split(",").map((entry) => entry.trim());
+  if (paths.length === 0 || paths.some((entry) => !entry || !ALL_WRITE_PATHS_SET.has(entry))) {
+    return null;
+  }
+  if (new Set(paths).size !== paths.length) return null;
+  return paths;
+}
+
+/**
  * Validate a write target before Pi executes the tool. This intentionally
  * accepts only the three literal POSIX-relative paths; manifest validation
  * remains the post-execution defense in depth.
@@ -38,11 +53,15 @@ export interface PiExtensionApi {
 export async function validatePiWriteTarget(
   cwd: string,
   candidatePath: unknown,
+  allowedPaths: readonly string[] = ALL_WRITE_PATHS,
 ): Promise<PiWriteBoundaryDecision> {
+  if (!isValidAllowlist(allowedPaths)) {
+    return { allowed: false, reason: "write allowlist is missing or invalid" };
+  }
   if (typeof candidatePath !== "string") {
     return { allowed: false, reason: "write path must be a string" };
   }
-  if (!ALLOWED_WRITE_PATHS.has(candidatePath)) {
+  if (!allowedPaths.includes(candidatePath)) {
     return { allowed: false, reason: `write path is not an allowed candidate: ${candidatePath}` };
   }
 
@@ -89,12 +108,24 @@ function isNotFound(error: unknown): boolean {
 
 /** Pi extension entrypoint: block unauthorized write calls before execution. */
 export default function registerWriteBoundary(api: PiExtensionApi): void {
+  const allowedPaths = parsePiWriteAllowlist(process.env.PI_WRITE_ALLOWED_PATHS);
   api.on("tool_call", async (event, context) => {
     if (event.toolName !== "write") return undefined;
+    if (allowedPaths === null) {
+      return { block: true, reason: "write allowlist is missing or invalid" };
+    }
     const input = isRecord(event.input) ? event.input : undefined;
-    const decision = await validatePiWriteTarget(context.cwd, input?.path);
+    const decision = await validatePiWriteTarget(context.cwd, input?.path, allowedPaths);
     return decision.allowed ? undefined : { block: true, reason: decision.reason };
   });
+}
+
+function isValidAllowlist(paths: readonly string[]): boolean {
+  return (
+    paths.length > 0 &&
+    new Set(paths).size === paths.length &&
+    paths.every((candidate) => ALL_WRITE_PATHS_SET.has(candidate))
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

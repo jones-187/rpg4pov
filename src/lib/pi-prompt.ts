@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { readTurnHistoryRaw } from "./turn-history";
-import { readInitSkeletonContext } from "./init-context";
+import { readInitOpeningContext, readInitSkeletonContext } from "./init-context";
 
 /**
  * pi 回合执行 prompt（性能优化分支）。
@@ -157,26 +157,21 @@ export async function buildTurnUserPrompt(
 }
 
 /**
- * Pi initialization plan. Init receives the user's canon and skeleton up
- * front, emits three candidate files, and leaves validation/committed writes
- * to the server.
+ * Phase 1: generate and submit only the complete conceptual workspace bundle.
+ * The server applies it only after parsing and validating the whole document.
  */
-export const PI_INIT_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化 agent，不是编码助手。当前目录是 Story Workspace；所有骨架和用户设定已预注入，禁止读取文件。
+export const PI_INIT_CONCEPTS_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化 agent，不是编码助手。当前目录是 Story Workspace；用户 canon 和初始化骨架已预注入，禁止读取文件。
 
-## 初始化契约
+## Phase 1：概念文件 Bundle
 - 用户设定是 canon：明确写出的角色、关系、世界、规则、基调和 POV 必须原文保留，只能补全未定义部分。
-- 生成可玩的小场景：world.md 必须写明有限地点、有限时间跨度、氛围、God State 隐藏事实（主角未知），并保留矛盾、秘密、风险或压力；不要预写固定剧情、固定剧本、路线、章节大纲或结局。
-- 正常未指定人数时生成 3-5 个核心 NPC；canon 明确人数时服从 canon。
-- player.md 必须包含初始状态、主角已知信息、Protagonist Core（narrativeVoice、temperament、emotionalExpression、conflictStyle、relationshipStyle、humorStyle、initiative、moralBoundaries、speechPatterns、avoidExpressions）与 Player Agency 边界。默认第一人称主角限知，明确指定的 POV 以 canon 为准。
-- rules.md 必须包含判定风格与随机权重约定；初始化不调用随机工具。
-- 每个 actors/*.md 核心 NPC 必须包含表面形象、私有记忆/动机、voice（具体说话方式与禁用表达）、基本动机，以及四层结构：Emotional Core（coreNeed、coreFear、vulnerability、defensivePattern、approachPattern、retreatPattern）；Relationship State（NPC→protagonist，含 surfaceRelationship、privateMeaning、desiredPosition、perceivedPosition、approachImpulse、avoidanceImpulse、unresolvedQuestion、currentTension、recentEvidence；只做 NPC→主角方向，不做 NPC↔NPC 关系图）；Emotionally Salient Memories（初始 0-2 条，每条含 event、meaning、impact；是模型内部的人物行为约束，不是小说正文）；Current Intent（含 currentEmotion、emotionalTrigger、emotionalConflict、immediateGoal、hiddenIntent、restraint、behaviorStrategy、voice）。稳定情感核心不可为剧情方便改写；初始不得因恋爱/后宫/修罗场标签默认爱、依赖或嫉妒，真正的喜欢、依赖、嫉妒、害怕失去、爱必须由后续经历逐渐获得。
-- 开场 output.md 只能写主角可见视窗（输出隔离），首行必须是「# 主角视窗」；不得泄漏 God State、NPC 私有记忆/情感状态、hiddenIntent、内部判断或结构化状态。
+- world.md 要写有限地点、有限时间跨度、氛围、God State 隐藏事实（主角未知），并保留矛盾、秘密、风险或压力；不要预写固定剧情、路线、章节大纲或结局。
+- 未指定人数时生成 3-5 个核心 NPC；canon 明确人数时服从 canon。
+- player.md 要有初始状态、主角已知信息、Protagonist Core（narrativeVoice、temperament、emotionalExpression、conflictStyle、relationshipStyle、humorStyle、initiative、moralBoundaries、speechPatterns、avoidExpressions）与 Player Agency 边界；默认第一人称主角限知，明确指定 POV 以 canon 为准。
+- rules.md 要有判定风格与随机权重约定；初始化不调用随机工具。
+- 每个 actors/*.md 都要有表面形象、私有记忆/动机、voice（具体说话方式与禁用表达）、基本动机，以及四个独立标题：Emotional Core、Relationship State、Emotionally Salient Memories、Current Intent。Emotional Core 含 coreNeed、coreFear、vulnerability、defensivePattern、approachPattern、retreatPattern；Relationship State 仅 NPC→protagonist，含 surfaceRelationship、privateMeaning、desiredPosition、perceivedPosition、approachImpulse、avoidanceImpulse、unresolvedQuestion、currentTension、recentEvidence，不做 NPC↔NPC 关系图；Emotionally Salient Memories 初始 0-2 条，每条含 event、meaning、impact，是模型内部的人物行为约束，不是小说正文；Current Intent 含 currentEmotion、emotionalTrigger、emotionalConflict、immediateGoal、hiddenIntent、restraint、behaviorStrategy、voice。稳定 Emotional Core 不为剧情方便改写；恋爱/后宫/修罗场不等于初始爱、依赖或嫉妒，喜欢、依赖、嫉妒、害怕失去、爱只能由后续经历逐渐获得。
 
-## 三个候选产物（必须一次并行 write）
-必须在同一条回复中并发调用 write 工具，且只创建/覆盖以下三个文件：
-1. turn/output.md：首行必须恰为「# 主角视窗」；其后写开场主角视窗，遵守 POV 和输出隔离，不写 JSON。
-2. turn/interaction.json：仅为 {"mode":"continue"|"decision","suggestions":[...]}；建议 0–4 个，只在真正决策点提供。
-3. turn/state-update.md：完整 Init Workspace Bundle。每个文件都用完整正文，不使用 APPEND/REPLACE：
+## Phase 1 写盘边界
+本阶段只允许一次并行 write 创建或覆盖 turn/state-update.md。不能写 turn/output.md（opening 的输出隔离要求是首行必须恰为「# 主角视窗」，但 Phase 1 不得写它），不能写 turn/interaction.json；不要把文件内容放在回复正文。state-update.md 必须是完整 Init Workspace Bundle：
 === FILE: world.md ===
 完整正文
 === FILE: player.md ===
@@ -185,15 +180,30 @@ export const PI_INIT_SYSTEM_PROMPT = `你是故事模拟引擎的故事初始化
 完整正文
 === FILE: actors/name.md ===
 完整正文
-必须包含 world.md、player.md、rules.md 各一份及至少一张 actors/*.md；只允许 actors 下一层 Markdown 文件。不要在 Bundle 外写任何概念文件。
+Bundle 必须恰好包含 world.md、player.md、rules.md 各一份，至少一张 actors/*.md，且 actors 只能下一层 Markdown 文件；所有正文非空、不能是明确占位。不要使用 APPEND/REPLACE。
 
-禁止写 story.md、turns/**（包括 turns/history.jsonl）、turn/input.md、adjustments.md、tendencies.md 或其他文件；不要写 done.json，服务端会在完整 Bundle 校验并应用后写入。不要把文件内容放在回复正文。三个 write 完成后最终回复只写「初始化完成」。`;
+禁止写 story.md、turns/**（包括 turns/history.jsonl）、turn/input.md、adjustments.md、tendencies.md；不要写 done.json 或其他文件。服务端会在 Bundle 校验并应用后进入 Phase 2。完成 write 后最终回复只写「概念完成」。`;
 
-/** Build init user prompt with canon and complete placeholder skeleton. */
-export async function buildInitUserPrompt(workspaceDir: string, setting: string): Promise<string> {
+/**
+ * Phase 2: produce the opening from a server-built player-visible context.
+ * The context intentionally has no raw setting/world/private actor sections.
+ */
+export const PI_INIT_OPENING_SYSTEM_PROMPT = `你是故事模拟引擎的开场叙事 agent，不是编码助手。当前目录是 Story Workspace；服务端已提供经过筛选的主角可见上下文，禁止读取文件。
+
+## Phase 2：opening
+只依据预注入的主角可见信息写开场。上下文只包含 player.md 的初始状态、主角已知信息、Protagonist Core、Player Agency，以及每张 actor 的标题、表面形象、voice。不要猜测或复述未提供的世界隐藏事实、God State、原始秘密设定、NPC 私有记忆、Emotional Core、Relationship State、Current Intent 或 hiddenIntent；这些内容绝不能进入 output。
+
+## Phase 2 写盘边界
+本阶段只允许一次并行 write：turn/output.md 与 turn/interaction.json。不能写 turn/state-update.md，不能写 done.json 或任何其他文件。turn/output.md 首行必须恰为「# 主角视窗」，正文只写主角可见的 POV 叙事（输出隔离），不写 JSON 或内部结构；turn/interaction.json 只能是 {"mode":"continue"|"decision","suggestions":[...]}，建议 0-4 条。服务端负责校验并写 done marker。完成 write 后最终回复只写「开场完成」。`;
+
+/** Backwards-compatible aggregate marker for old contract tests/callers. */
+export const PI_INIT_SYSTEM_PROMPT = `${PI_INIT_CONCEPTS_SYSTEM_PROMPT}\n\n${PI_INIT_OPENING_SYSTEM_PROMPT}`;
+
+/** Build Phase 1 user prompt with canon and complete placeholder skeleton. */
+export async function buildInitConceptsUserPrompt(workspaceDir: string, setting: string): Promise<string> {
   const skeleton = await readInitSkeletonContext(workspaceDir);
   return [
-    "执行故事初始化。以下内容是只读预注入上下文，禁止读取文件。",
+    "执行 Phase 1 概念初始化。以下内容是只读预注入上下文，禁止读取文件。",
     "",
     "## 用户设定（canon，优先级最高）",
     setting,
@@ -201,6 +211,21 @@ export async function buildInitUserPrompt(workspaceDir: string, setting: string)
     "## 初始化骨架文件（完整原文，仅供填充参考）",
     skeleton,
     "",
-    "按 system 提示生成三个候选产物；初始化不调用随机工具。",
+    "按 Phase 1 system 提示只生成完整 Bundle 候选；初始化不调用随机工具。",
   ].join("\n");
 }
+
+/** Build Phase 2 user prompt from the already-applied, filtered context. */
+export async function buildInitOpeningUserPrompt(workspaceDir: string): Promise<string> {
+  const visibleContext = await readInitOpeningContext(workspaceDir);
+  return [
+    "执行 Phase 2 opening。以下内容是服务端筛选后的只读主角可见上下文，禁止读取文件。",
+    "",
+    visibleContext,
+    "",
+    "按 Phase 2 system 提示生成开场候选，不写概念文件。",
+  ].join("\n");
+}
+
+/** Historical names remain for Claude/Pi fixture compatibility. */
+export const buildInitUserPrompt = buildInitConceptsUserPrompt;

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { resolveAgentModel } from "./agent-model";
 
 /**
  * pi coding agent 的运行时配置（性能优化分支）。
@@ -14,15 +15,11 @@ import os from "node:os";
  *   enable_thinking 参数（Anthropic 端点会被网关吞掉）
  * - reasoning:false 是 3 工具并行成功那次跑的配置；:off 档会破坏 qwen
  *   工具调用可靠性（两次废回合实证），禁用
- * - 模型锁定 qwen-fp8（项目约束；可经 ANTHROPIC_MODEL 显式覆盖以便未来验收）
+ * - 模型硬锁 qwen-fp8；冲突配置直接失败，不回退、不改用其他模型
  */
 
-/** 默认模型：本分支验收约束锁定 qwen-fp8 */
-const DEFAULT_PI_MODEL = "qwen-fp8";
-
-export function resolvePiModel(): string {
-  return process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_PI_MODEL;
-}
+/** 兼容既有调用名；实际策略由共享的模型白名单负责。 */
+export const resolvePiModel = resolveAgentModel;
 
 /** pi agent 目录（~/.pi/agent；测试经 PI_HOME 覆盖） */
 export function resolvePiAgentDir(): string {

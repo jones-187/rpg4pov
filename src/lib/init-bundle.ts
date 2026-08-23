@@ -14,6 +14,12 @@ export type InitWorkspaceBundleResult =
 
 const REQUIRED_FILES = ["world.md", "player.md", "rules.md"] as const;
 const FILE_HEADER_RE = /^===\s*FILE:\s*(.*?)\s*===$/;
+const ACTOR_REQUIRED_HEADINGS = [
+  "emotional core",
+  "relationship state",
+  "emotionally salient memories",
+  "current intent",
+] as const;
 
 /**
  * Parse and validate the complete bundle emitted by the Pi init prompt.
@@ -81,6 +87,10 @@ export function validateInitWorkspaceFiles(files: InitWorkspaceFile[]): string |
   if (!files.some((file) => file.path.startsWith("actors/"))) {
     return "init bundle requires at least one actors/*.md file";
   }
+  for (const actor of files.filter((file) => file.path.startsWith("actors/"))) {
+    const actorError = validateActorStructure(actor.content);
+    if (actorError) return `${actor.path}: ${actorError}`;
+  }
   return null;
 }
 
@@ -145,4 +155,75 @@ function isPlaceholderContent(content: string): boolean {
       /^#?\s*(?:TODO|TBD)(?:\s*[：:].*)?$/iu.test(trimmed)
     );
   });
+}
+
+function validateActorStructure(content: string): string | null {
+  const headings = extractMarkdownHeadings(content);
+  const names = new Set(headings.map((heading) => normalizeHeading(heading.title)));
+  for (const required of ACTOR_REQUIRED_HEADINGS) {
+    if (!names.has(required)) return `actor is missing ${required} heading`;
+  }
+
+  const memoriesHeading = headings.find(
+    (heading) => normalizeHeading(heading.title) === "emotionally salient memories",
+  );
+  if (!memoriesHeading) return "actor is missing emotionally salient memories heading";
+  const memoriesBody = content
+    .split(/\r?\n/)
+    .slice(memoriesHeading.bodyStart, memoriesHeading.bodyEnd)
+    .join("\n")
+    .trim();
+  const emptyMemoryMarker = memoriesBody.replace(/[\s（）()[\]。.!！]/gu, "");
+  if (
+    memoriesBody === "" ||
+    emptyMemoryMarker === "初始暂无" ||
+    emptyMemoryMarker === "无" ||
+    /^0条?$/u.test(emptyMemoryMarker)
+  ) {
+    return null;
+  }
+  const requiredMemoryFields: Array<[string, RegExp]> = [
+    ["event", /(?:^|\n)\s*(?:[-*]\s*)?(?:event|事件)\s*[:：]/iu],
+    ["meaning", /(?:^|\n)\s*(?:[-*]\s*)?(?:meaning|含义|意义)\s*[:：]/iu],
+    ["impact", /(?:^|\n)\s*(?:[-*]\s*)?(?:impact|影响)\s*[:：]/iu],
+  ];
+  for (const [field, pattern] of requiredMemoryFields) {
+    if (!pattern.test(memoriesBody)) return `actor memories are missing ${field}`;
+  }
+  return null;
+}
+
+interface MarkdownHeading {
+  title: string;
+  level: number;
+  bodyStart: number;
+  bodyEnd: number;
+}
+
+function extractMarkdownHeadings(content: string): MarkdownHeading[] {
+  const lines = content.split(/\r?\n/);
+  const headings: MarkdownHeading[] = [];
+  lines.forEach((line, index) => {
+    const match = line.match(/^\s*(#{1,6})\s+(.+?)\s*$/);
+    if (!match) return;
+    const level = match[1]?.length ?? 1;
+    const previous = headings[headings.length - 1];
+    if (previous && level <= previous.level) previous.bodyEnd = index;
+    headings.push({
+      title: match[2] ?? "",
+      level,
+      bodyStart: index + 1,
+      bodyEnd: lines.length,
+    });
+  });
+  return headings;
+}
+
+function normalizeHeading(title: string): string {
+  return title
+    .trim()
+    .replace(/[:：].*$/u, "")
+    .replace(/[（(].*?[）)]/gu, "")
+    .trim()
+    .toLocaleLowerCase();
 }

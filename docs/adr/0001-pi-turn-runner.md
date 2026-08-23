@@ -1,6 +1,8 @@
 # 回合执行从 claude CLI agent 循环迁移到 pi（预注入上下文 + 合并写盘）
 
-2026-08 性能优化分支：Story Turn（热路径，目标 ≤60s）与 Story Initialization 均可由 Pi Runner 执行——服务端按 `req.task` 选择 prompt；turn 预注入全部 workspace 上下文并写增量 State Update Bundle，init 预注入用户 canon/骨架并写完整 Init Workspace Bundle，服务端校验应用后写 done.json。`AGENT_RUNNER=pi` 使用单一 PiRunner；`AGENT_RUNNER=claude` 仍经 `TaskDispatchRunner` 保留 turn→Pi、init→Claude 的 A/B 基线。锁/快照/回滚/输出契约链路不变。
+2026-08 性能优化分支：Story Turn（热路径，目标 ≤60s）与 Story Initialization 均可由 Pi Runner 执行——服务端按 `req.task` 选择 prompt；turn 预注入全部 workspace 上下文并写增量 State Update Bundle，init 先以 Phase 1 预注入用户 canon/骨架并提交完整 Init Workspace Bundle，再以 Phase 2 从已应用概念文件构造主角可见 opening context，最后由服务端校验并写 done.json。`AGENT_RUNNER=pi` 使用单一 PiRunner；`AGENT_RUNNER=claude` 仍经 `TaskDispatchRunner` 保留 turn→Pi、init→Claude 的 A/B 基线。锁/快照/回滚/输出契约链路不变。
+
+第一阶段当前状态：Pi init 的两阶段隔离、阶段 allowlist extension、manifest 纵深校验和 opening 预览竞态守卫已落地；首次真实 A/B 结果见 [`docs/acceptance/2026-08-23-pi-init-ab-acceptance.md`](../acceptance/2026-08-23-pi-init-ab-acceptance.md)。A/B 尚未满足删除 Claude 的质量门，因此 Claude 路径继续作为基线与退路。
 
 ## 为什么（实测数字，2026-08-22，NewAPI 网关 + qwen-fp8）
 
