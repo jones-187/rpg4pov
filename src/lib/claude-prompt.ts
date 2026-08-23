@@ -8,6 +8,8 @@
 
 import { TURN_OUTPUT_HEADING } from "./turn-output";
 
+export { INIT_SKELETON_FILES } from "./init-context";
+
 /**
  * Issue 10「继续」系统指令的 turn/input.md 内容。
  * 它是系统级控制（让当前人物和事件自然发展，直到下一次有效变化或真正的决策点），
@@ -129,11 +131,6 @@ DO NOT:
 - 完成必须写 done.json（status=success）；无法完成则不写（触发回滚）
 - 随机判定结果必须服从，不得在 output 中直接展示 random log 内容
 - 仅可写 turn/output.md、turn/interaction.json、turn/done.json、world.md、player.md、actors/**、adjustments.md、tendencies.md；不得创建其他文件`;
-
-/**
- * init 骨架预注入的文件清单（runner 读取占位文件与模板说明共用此单源）。
- */
-export const INIT_SKELETON_FILES = ["story.md", "world.md", "player.md", "rules.md"] as const;
 
 export function buildPrompt(playerInput: string): string {
   return STORY_TURN_RUNNER_PROMPT_TEMPLATE.replace("{PLAYER_INPUT}", () => playerInput);

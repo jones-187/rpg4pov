@@ -11,6 +11,11 @@ import {
 } from "./pi-prompt";
 import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
 import { applyInitWorkspaceBundle, parseInitWorkspaceBundle } from "./init-bundle";
+import {
+  captureWorkspaceManifest,
+  findUnauthorizedWorkspaceChange,
+  type WorkspaceManifest,
+} from "./workspace-manifest";
 import { generateRollPool, recordPoolRoll, type RollChoiceRng } from "./random-tool";
 import { sanitizeForLog } from "./diagnostics";
 import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
@@ -46,6 +51,12 @@ const SIGKILL_GRACE_MS = 5_000;
 const ROLL_POOL_SIZE = 6;
 /** 早退看门狗轮询间隔 */
 const WATCH_INTERVAL_MS = 200;
+/** Init agent may only mutate these three candidate artifacts. */
+const INIT_ALLOWED_ARTIFACTS = [
+  "turn/output.md",
+  "turn/interaction.json",
+  "turn/state-update.md",
+] as const;
 
 /** 从 process.env 传递给 pi 的白名单（models.json 已含密钥，不传 token） */
 const PI_ENV_WHITELIST = ["PATH", "HOME", "NODE_ENV", "TMPDIR"];
@@ -277,7 +288,7 @@ export class PiRunner implements AgentRunner {
         signal: req.signal,
         stdinData: "",
         stdio: ["pipe", "pipe", "pipe"],
-        onStdoutLine: makePiEventHandler(req, attemptToken),
+        onStdoutLine: makePiEventHandler(req, attemptToken, task),
       };
       let clearKillTimer: (() => void) | undefined;
       const onAbort = () => {
@@ -285,24 +296,72 @@ export class PiRunner implements AgentRunner {
       };
       req.signal.addEventListener("abort", onAbort);
       const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
+      let initManifestBefore: WorkspaceManifest | undefined;
+      if (task === "init") {
+        try {
+          initManifestBefore = await captureWorkspaceManifest(req.workspaceDir);
+        } catch (err) {
+          req.signal.removeEventListener("abort", onAbort);
+          return {
+            success: false,
+            error: "pi init workspace manifest failed",
+            detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
+          };
+        }
+      }
       const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, task);
 
-      let result: SpawnResult;
+      let result: SpawnResult | undefined;
+      let spawnError: unknown = null;
       try {
         result = await this.spawnFn(this.piPath, args, spawnOpts);
       } catch (err) {
-        watcher.stop();
-        req.signal.removeEventListener("abort", onAbort);
-        return {
-          success: false,
-          error: "pi runner crashed",
-          detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
-        };
+        // Keep the post-spawn manifest check ahead of exit/error handling: a
+        // child may have written outside the init boundary before failing.
+        spawnError = err;
       } finally {
         clearKillTimer?.();
       }
       watcher.stop();
       req.signal.removeEventListener("abort", onAbort);
+
+      if (task === "init" && initManifestBefore) {
+        let initManifestAfter: WorkspaceManifest;
+        try {
+          initManifestAfter = await captureWorkspaceManifest(req.workspaceDir);
+        } catch (err) {
+          return {
+            success: false,
+            error: "pi init workspace manifest failed",
+            detail: `attempt ${attempt}: ${sanitizeForLog(
+              err instanceof Error ? err.message : String(err),
+            )}`,
+          };
+        }
+        const unauthorized = findUnauthorizedWorkspaceChange(
+          initManifestBefore,
+          initManifestAfter,
+          INIT_ALLOWED_ARTIFACTS,
+        );
+        if (unauthorized) {
+          return {
+            success: false,
+            error: "pi init workspace write boundary violated",
+            detail: `attempt ${attempt}: ${unauthorized}`,
+          };
+        }
+      }
+
+      if (spawnError !== null) {
+        return {
+          success: false,
+          error: "pi runner crashed",
+          detail: sanitizeForLog(spawnError instanceof Error ? spawnError.message : String(spawnError)),
+        };
+      }
+      if (!result) {
+        return { success: false, error: "pi runner crashed", detail: "spawn returned no result" };
+      }
 
       if (result.aborted || req.signal.aborted) {
         return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
@@ -473,12 +532,15 @@ interface PiToolCallBlock {
 /**
  * pi --mode json 事件流 → 叙事先行预览。
  * 只消费 toolcall_end（write 参数组合完成，早于磁盘写与服务端收尾）：
- * output.md 就绪即发布叙事（先跑与权威路径相同的泄密守卫），
- * interaction.json 就绪即发布净化后的交互建议。预览只是提前显示，
+ * turn 的 output.md 就绪即发布叙事；init 等本 attempt 的 output 与
+ * interaction 都就绪后再用后者做泄密指纹。交互建议始终先净化再发布。预览只是提前显示，
  * 权威仍是磁盘产物 + orchestrator 校验链。token 为 attempt 令牌——
  * 迟到发布（跨越重试/终局）由 turn-progress 丢弃。
  */
-function makePiEventHandler(req: TurnRequest, token: number): (line: string) => void {
+function makePiEventHandler(req: TurnRequest, token: number, task: "turn" | "init"): (line: string) => void {
+  const initPreview: { output?: string; interactionFingerprints?: string[] } | undefined =
+    task === "init" ? {} : undefined;
+
   return (line) => {
     let ev: {
       type?: string;
@@ -504,12 +566,57 @@ function makePiEventHandler(req: TurnRequest, token: number): (line: string) => 
     if (!block || block.type !== "toolCall" || block.name !== "write") return;
     const filePath = typeof block.arguments?.path === "string" ? block.arguments.path : "";
     const content = typeof block.arguments?.content === "string" ? block.arguments.content : "";
-    if (filePath.endsWith("turn/output.md")) {
-      void publishNarrativePreview(req, content, token);
-    } else if (filePath.endsWith("turn/interaction.json")) {
+    const artifact = resolvePiPreviewArtifact(req.workspaceDir, filePath);
+    if (artifact === "output") {
+      if (initPreview) {
+        initPreview.output = content;
+        publishInitNarrativeWhenReady(req, initPreview, token);
+      } else {
+        void publishNarrativePreview(req, content, token);
+      }
+    } else if (artifact === "interaction") {
+      const interactionFingerprints = buildInteractionFingerprints(content);
+      if (initPreview) initPreview.interactionFingerprints = interactionFingerprints;
       publishInteractionPreview(req, content, token);
+      if (initPreview) publishInitNarrativeWhenReady(req, initPreview, token);
     }
   };
+}
+
+function resolvePiPreviewArtifact(
+  workspaceDir: string,
+  filePath: string,
+): "output" | "interaction" | null {
+  if (filePath === "" || filePath.includes("\0")) return null;
+  const normalizedInput = filePath.split(path.sep).join("/");
+  if (!path.isAbsolute(filePath) && !["turn/output.md", "turn/interaction.json"].includes(normalizedInput)) {
+    return null;
+  }
+  const relative = path.relative(path.resolve(workspaceDir), path.resolve(workspaceDir, filePath));
+  const normalized = relative.split(path.sep).join("/");
+  if (normalized === "turn/output.md") return "output";
+  if (normalized === "turn/interaction.json") return "interaction";
+  return null;
+}
+
+function buildInteractionFingerprints(content: string): string[] {
+  try {
+    const compact = JSON.stringify(JSON.parse(content));
+    if (typeof compact !== "string" || compact.length === 0) return [];
+    const raw = content.trim();
+    return raw === compact ? [compact] : [raw, compact];
+  } catch {
+    return [];
+  }
+}
+
+function publishInitNarrativeWhenReady(
+  req: TurnRequest,
+  preview: { output?: string; interactionFingerprints?: string[] },
+  token: number,
+): void {
+  if (preview.output === undefined || !preview.interactionFingerprints?.length) return;
+  void publishNarrativePreview(req, preview.output, token, preview.interactionFingerprints);
 }
 
 /** 叙事预览发布：首行契约 + 占位排除 + 与权威路径同源的泄密守卫，全过才发布 */
@@ -517,17 +624,24 @@ async function publishNarrativePreview(
   req: TurnRequest,
   content: string,
   token: number,
+  interactionFingerprintsOverride?: readonly string[],
 ): Promise<void> {
   const trimmed = content.trim();
   const firstLine = trimmed.split("\n")[0]?.trim();
   if (firstLine !== "# 主角视窗" || trimmed === TURN_OUTPUT_PLACEHOLDER.trim()) return;
   try {
     const rollLines = await readRandomRollLines(req.storyId);
-    const interactionRawLine = await readTurnInteractionRawLine(req.storyId);
+    let interactionFingerprints: string[];
+    if (interactionFingerprintsOverride !== undefined) {
+      interactionFingerprints = [...interactionFingerprintsOverride];
+    } else {
+      const interactionRawLine = await readTurnInteractionRawLine(req.storyId);
+      interactionFingerprints = interactionRawLine ? [interactionRawLine] : [];
+    }
     const problem = validateTurnOutput(
       trimmed,
       rollLines,
-      interactionRawLine ? [interactionRawLine] : [],
+      interactionFingerprints,
     );
     if (problem) return;
     publishTurnProgress(req.storyId, { phase: "narrative-ready", narrative: trimmed }, token);

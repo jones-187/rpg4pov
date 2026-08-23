@@ -118,11 +118,6 @@ export async function applyInitWorkspaceBundle(
   }
 }
 
-/** Alias kept short for callers that treat this as the init bundle seam. */
-export const parseInitBundle = parseInitWorkspaceBundle;
-export const applyInitBundle = applyInitWorkspaceBundle;
-export const validateInitBundle = validateInitWorkspaceFiles;
-
 function isAllowedInitPath(file: string): boolean {
   if (REQUIRED_FILES.includes(file as (typeof REQUIRED_FILES)[number])) return true;
   // POSIX workspace paths only: reject Windows separators, absolute paths,
@@ -139,12 +134,15 @@ function isAllowedInitPath(file: string): boolean {
   return /^actors\/[^/\\]+\.md$/.test(file);
 }
 
-/** Public path predicate for callers/tests that validate before parsing. */
-export const isAllowedInitWorkspacePath = isAllowedInitPath;
-
 function isPlaceholderContent(content: string): boolean {
-  // Keep this aligned with workspace.ts: only the explicit scaffold marker
-  // means "the initialization skeleton was left untouched". Canon text may
-  // legitimately discuss TODOs or use the English word "placeholder".
-  return content.includes("（占位");
+  // Keep this aligned with workspace.ts while avoiding false positives when
+  // canon merely discusses TODOs or uses the English word "placeholder".
+  return content.split(/\r?\n/).some((line) => {
+    const trimmed = line.trim();
+    return (
+      /^（占位(?:[：:].*)?）?$/u.test(trimmed) ||
+      /^占位(?:\s*[：:].*)?$/u.test(trimmed) ||
+      /^#?\s*(?:TODO|TBD)(?:\s*[：:].*)?$/iu.test(trimmed)
+    );
+  });
 }

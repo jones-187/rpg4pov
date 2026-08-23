@@ -2,7 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunner, RunnerTask, TurnRequest, TurnResult } from "./agent-runner";
 import { defaultSpawn, type SpawnFn, type SpawnOpts, type SpawnResult } from "./agent-spawn";
-import { buildPrompt, buildInitPrompt, INIT_SKELETON_FILES } from "./claude-prompt";
+import { buildPrompt, buildInitPrompt } from "./claude-prompt";
+import { readInitSkeletonContext } from "./init-context";
 import { CLAUDE_SETTINGS_PATH } from "./claude-settings";
 import { sanitizeForLog } from "./diagnostics";
 import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
@@ -16,24 +17,6 @@ async function defaultPromptTemplate(
   return task === "init"
     ? buildInitPrompt(input, await readInitSkeletonContext(workspaceDir))
     : buildPrompt(input);
-}
-
-/**
- * init 骨架文件预注入段：读取占位文件原文拼进 prompt。
- * 缺失文件标"（不存在）"——正常 init 流程骨架必然存在，防御性兜底。
- */
-async function readInitSkeletonContext(workspaceDir: string): Promise<string> {
-  const parts: string[] = [];
-  for (const file of INIT_SKELETON_FILES) {
-    let content: string;
-    try {
-      content = (await fs.readFile(path.join(workspaceDir, file), "utf8")).trimEnd();
-    } catch {
-      content = "（不存在）";
-    }
-    parts.push(`=== ${file} ===\n${content}`);
-  }
-  return parts.join("\n\n");
 }
 
 // Re-export the neutral seam for existing callers and tests. New runners should

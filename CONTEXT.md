@@ -162,7 +162,7 @@ _Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输�
 _Avoid_: 让模型逐文件多次写盘、把 Bundle 当作新的故事状态源
 
 ### Init Workspace Bundle（初始化工作区包）
-`turn/state-update.md` 在 `task="init"` 时改为完整文件段：每段 `=== FILE: ... ===` 后是完整正文，必须恰好包含 `world.md`、`player.md`、`rules.md` 各一份及至少一张 `actors/*.md`。服务端先整体解析/校验路径、重复、空内容、占位与越权，再批量应用；无效 attempt 不得部分写入，重试耗尽不写 Done Marker。init 不使用 `APPEND/REPLACE` 或随机池。
+`turn/state-update.md` 在 `task="init"` 时改为完整文件段：每段 `=== FILE: ... ===` 后是完整正文，必须恰好包含 `world.md`、`player.md`、`rules.md` 各一份及至少一张 `actors/*.md`。服务端先整体解析/校验路径、重复、空内容、占位与越权，再批量应用；无效 attempt 不得部分写入，重试耗尽不写 Done Marker。每个 Pi init attempt 还会对 Story Workspace 做完整文件/目录 manifest，除三个候选文件外任何新增、删除或改写都立即失败且不重试，由 Orchestrator 快照回滚。init 不使用 `APPEND/REPLACE` 或随机池。
 
 ### Runner 切换（Runner Selection）
 Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `pi` / `claude`），默认 `fake`。`pi` 模式下 init 与 turn 共用同一个 PiRunner；`claude` 模式下按 Runner Task 分发：turn → Pi Runner，init → Claude Code Runner（A/B 基线，第一阶段保留）。单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用真实 runner，Pi 与 Claude 分别由覆盖文件选择。vitest 契约测试始终用 `fake`/`fake-pi`，不依赖真实 CLI/凭证/网络。

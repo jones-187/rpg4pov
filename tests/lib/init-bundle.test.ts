@@ -50,6 +50,15 @@ describe("Init Workspace Bundle", () => {
   });
 
   it.each([
+    "TODO: later",
+    "占位：待补充",
+    "# TBD",
+  ])("rejects a standalone scaffold marker: %s", (marker) => {
+    const marked = VALID_BUNDLE.replace("一座被雨包围的灯塔。", marker);
+    expect(parseInitWorkspaceBundle(marked).ok).toBe(false);
+  });
+
+  it.each([
     "=== FILE: world.md ===\n\n=== FILE: player.md ===\n内容\n=== FILE: rules.md ===\n内容\n=== FILE: actors/a.md ===\n内容",
     "=== FILE: world.md ===\n内容\n=== FILE: world.md ===\n重复\n=== FILE: player.md ===\n内容\n=== FILE: rules.md ===\n内容\n=== FILE: actors/a.md ===\n内容",
     "=== FILE: world.md ===\n内容\n=== FILE: player.md ===\n内容\n=== FILE: rules.md ===\n内容\n=== FILE: actors/nested/a.md ===\n内容",

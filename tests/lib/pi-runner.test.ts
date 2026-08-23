@@ -188,6 +188,62 @@ describe("PiRunner", () => {
     await expect(fs.access(path.join(dir, "turn/done.json"))).rejects.toThrow();
   });
 
+  it("task=init rejects a formal-file write even when the attempt exits non-zero", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    let calls = 0;
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      calls++;
+      await fs.writeFile(path.join(opts.cwd, "turn/output.md"), OUTPUT_MD);
+      await fs.writeFile(path.join(opts.cwd, "turn/interaction.json"), INTERACTION_JSON);
+      await fs.writeFile(path.join(opts.cwd, "turn/state-update.md"), INIT_BUNDLE);
+      await fs.writeFile(path.join(opts.cwd, "world.md"), "越权改写\n");
+      return { code: 1, stdout: "failed after write", stderr: "model error" };
+    };
+    const result = await new PiRunner({ spawnFn: spawn }).runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("pi init workspace write boundary violated");
+    expect(result.detail).toContain("world.md");
+    expect(calls).toBe(1);
+    await expect(fs.access(path.join(dir, "turn/done.json"))).rejects.toThrow();
+  });
+
+  it("task=init rejects an extra file and never retries", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    let calls = 0;
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      calls++;
+      for (const [file, content] of Object.entries({
+        "turn/output.md": OUTPUT_MD,
+        "turn/interaction.json": INTERACTION_JSON,
+        "turn/state-update.md": INIT_BUNDLE,
+        "rogue.md": "不应出现\n",
+      })) {
+        const target = path.join(opts.cwd, file);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content);
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const result = await new PiRunner({ spawnFn: spawn }).runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("pi init workspace write boundary violated");
+    expect(result.detail).toContain("rogue.md");
+    expect(calls).toBe(1);
+    await expect(fs.access(path.join(dir, "turn/done.json"))).rejects.toThrow();
+  });
+
   it("成功路径：合并 state-update、服务端写 done.json、只 spawn 一次", async () => {
     const meta = await createStory();
     await appendTurnHistory(meta.storyId, {
@@ -593,6 +649,70 @@ describe("PiRunner 叙事先行预览", () => {
     const progress = readTurnProgress(meta.storyId);
     expect(progress!.narrative).toContain("你推门进来");
     expect(progress!.narrative).not.toContain("第一次尝试的叙事");
+    clearTurnProgress(meta.storyId);
+  });
+
+  it("init 预览 output 先到时等待本 attempt 的 interaction，再发布叙事", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const initOutput = "# 主角视窗\n\n灯塔门在雾里发出一声轻响。\n";
+    const initInteraction = JSON.stringify({ mode: "continue", suggestions: [] });
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      opts.onStdoutLine?.(piToolcallEndLine(1, path.join(dir, "turn", "output.md"), initOutput));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(readTurnProgress(meta.storyId)?.narrative).toBeUndefined();
+      opts.onStdoutLine?.(
+        piToolcallEndLine(1, path.join(dir, "turn", "interaction.json"), initInteraction),
+      );
+      await fs.writeFile(path.join(dir, "turn/output.md"), initOutput);
+      await fs.writeFile(path.join(dir, "turn/interaction.json"), initInteraction);
+      await fs.writeFile(path.join(dir, "turn/state-update.md"), INIT_BUNDLE);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+
+    const result = await new PiRunner({ spawnFn: spawn }).runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(true);
+    expect(readTurnProgress(meta.storyId)?.narrative).toContain("灯塔门");
+    clearTurnProgress(meta.storyId);
+  });
+
+  it.each([
+    ["output-first", ["output", "interaction"]],
+    ["interaction-first", ["interaction", "output"]],
+  ] as const)("init 预览 %s 时使用本 attempt interaction 阻止 output 泄漏", async (_label, order) => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const interaction = JSON.stringify({ mode: "decision", suggestions: ["打开门"] });
+    const leakyOutput = `# 主角视窗\n\n${interaction}\n`;
+    const spawn: SpawnFn = async (_cmd, _args, opts) => {
+      for (const item of order) {
+        opts.onStdoutLine?.(
+          piToolcallEndLine(
+            1,
+            path.join(dir, `turn/${item}.md`.replace("interaction.md", "interaction.json")),
+            item === "output" ? leakyOutput : interaction,
+          ),
+        );
+      }
+      await fs.writeFile(path.join(dir, "turn/output.md"), leakyOutput);
+      await fs.writeFile(path.join(dir, "turn/interaction.json"), interaction);
+      await fs.writeFile(path.join(dir, "turn/state-update.md"), INIT_BUNDLE);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+
+    const result = await new PiRunner({ spawnFn: spawn }).runTurn({
+      ...turnRequest(meta.storyId, dir),
+      playerInput: "设定",
+      task: "init",
+    });
+
+    expect(result.success).toBe(true);
+    expect(readTurnProgress(meta.storyId)?.narrative).toBeUndefined();
     clearTurnProgress(meta.storyId);
   });
 });
