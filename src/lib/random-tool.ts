@@ -174,11 +174,8 @@ async function appendRandomLog(
 }
 
 /**
- * 预掷随机数池（pi 回合路径，Issue 5 判定契约的无 bash 等价物）。
- *
- * pi prompt 禁用 bash（工具调用可靠性），agent 无法调用 roll-choice CLI；
- * 改由服务端在回合前生成一池 [0,1) 真随机样本注入 prompt，模型按序消耗。
- * 池在 runTurn 内一次生成、跨重试固定——重试不能换号（防故意失败刷点）。
+ * Generate private samples only after the complete candidate batch is fixed.
+ * The runner retains them across generation retries; they never enter prompts.
  */
 export function generateRollPool(size: number, rng?: RollChoiceRng): number[] {
   const n = Math.max(0, Math.floor(size));
@@ -198,7 +195,7 @@ export interface PoolRollRecordInput {
   /** 来自服务端预生成池的样本值（服务端持有，模型不可自选） */
   sample: number;
   candidates: RollChoiceCandidate[];
-  /** 模型申报的判定结果；与服务端重算不一致记 mismatch（服从性异常信号，不失败回合） */
+  /** 模型申报结果；调用方必须在提交前拒绝与绑定结果不一致的确认。 */
   declaredSelectedId?: string;
 }
 
@@ -213,11 +210,17 @@ export interface PoolRollRecordResult {
  * rollChoice 完全同一算法），写入与 claude 路径同形状的审计日志行——
  * orchestrator 的随机日志泄密守卫（readRandomRollLines）无需感知路径差异。
  *
- * 信任模型与 claude 路径对齐：样本真随机（crypto）、权重由 agent 自定
- * （claude 路径中 agent 同样自选权重）、服从性靠 prompt 约束；此处多一层
- * mismatch 信号用于诊断。日志由 Web 侧写入，agent 无权伪造。
+ * PiRunner 在候选冻结、结果绑定、确认一致后调用本函数。日志由服务端
+ * 写入；自然语言是否服从结果仍需要行为验收。
  */
 export async function recordPoolRoll(input: PoolRollRecordInput): Promise<PoolRollRecordResult> {
+  const recorded = resolvePoolRoll(input);
+  await appendRandomLog(input.storyId, input.workspaceDir, recorded.result, normalizeCandidates(input.candidates).candidates);
+  return recorded;
+}
+
+/** Resolve a previously fixed candidate list without writing an audit entry. */
+export function resolvePoolRoll(input: PoolRollRecordInput): PoolRollRecordResult {
   if (!isValidStoryId(input.storyId)) {
     throw new Error("invalid storyId");
   }
@@ -236,7 +239,6 @@ export async function recordPoolRoll(input: PoolRollRecordInput): Promise<PoolRo
     sample: input.sample,
     randomSource: "pool",
   };
-  await appendRandomLog(input.storyId, input.workspaceDir, result, candidates);
   return {
     result,
     mismatch: input.declaredSelectedId !== undefined && input.declaredSelectedId !== selectedCandidate.id,

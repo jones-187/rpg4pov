@@ -1,0 +1,218 @@
+{
+  "cases": [
+    {
+      "id": "action-execution-01",
+      "heldOut": false,
+      "dimension": "action_execution",
+      "vocabulary": {
+        "beaconLocation": ["storage_rack", "north_gate_stone"],
+        "northGate": ["open", "closed"]
+      },
+      "context": "灰穹观测站的北门开着；红色信标在储藏架上；信标尚未点亮。",
+      "playerInput": "把红色信标移到北门外的石台上，然后关上北门；不要点亮信标。",
+      "expected": {
+        "token": "ACTION:beacon_at_north_gate",
+        "boolean": {
+          "beaconMoved": true,
+          "beaconLit": false,
+          "northGateClosed": true
+        },
+        "actorKnownFacts": {},
+        "stateFacts": {
+          "beaconLocation": "north_gate_stone",
+          "beaconLit": false,
+          "northGate": "closed"
+        }
+      },
+      "forbidden": [
+        "ACTION:beacon_still_on_storage_rack",
+        "beaconLocation=storage_rack",
+        "beaconLit=true",
+        "northGate=open"
+      ]
+    },
+    {
+      "id": "time-relation-01",
+      "heldOut": false,
+      "dimension": "time_relation",
+      "vocabulary": {
+        "currentTime": ["MON_22:00", "TUE_09:00", "TUE_12:00"],
+        "storm": ["ongoing", "ended"],
+        "mailCoach": ["not_arrived", "arrived"]
+      },
+      "context": "赤杉邮站当前是周二09:00；周一22:00的暴雨已结束；周二12:00的邮车尚未到站。",
+      "playerInput": "我现在检查站前道路，只记录中午邮车尚未到站，不提前叙述它的结果。",
+      "expected": {
+        "token": "TIME:TUE_0900_BEFORE_MAIL",
+        "boolean": {
+          "stormEnded": true,
+          "mailCoachArrived": false,
+          "currentBeforeNoonMail": true
+        },
+        "actorKnownFacts": {},
+        "stateFacts": {
+          "currentTime": "TUE_09:00",
+          "storm": "ended",
+          "mailCoach": "not_arrived"
+        }
+      },
+      "forbidden": [
+        "TIME:mail_arrived_before_noon",
+        "currentTime=TUE_12:00_or_later",
+        "storm=ongoing",
+        "mailCoach=arrived"
+      ]
+    },
+    {
+      "id": "information-disclosure-01",
+      "heldOut": false,
+      "dimension": "information_disclosure",
+      "vocabulary": {
+        "actors": ["baichuan", "qiwen", "waiting_patients"],
+        "facts": ["medicine_key_in_east_cabinet"],
+        "disclosedTo": ["baichuan", "qiwen", "waiting_patients"]
+      },
+      "context": "镜湖诊所的旧账本写着药箱钥匙在东柜；药师柏川知道这条记录，护士绮文和候诊者不知道。",
+      "playerInput": "把药箱钥匙在东柜只告诉药师柏川；不要告诉护士绮文，也不要向候诊者公开。",
+      "expected": {
+        "token": "INFO:medicine_key_to_baichuan_only",
+        "boolean": {
+          "baichuanKnows": true,
+          "qiwenKnows": false,
+          "publicDisclosure": false
+        },
+        "actorKnownFacts": {
+          "baichuan": [
+            "medicine_key_in_east_cabinet"
+          ],
+          "qiwen": [],
+          "waiting_patients": []
+        },
+        "stateFacts": {
+          "secret": "medicine_key_in_east_cabinet",
+          "disclosedTo": [
+            "baichuan"
+          ],
+          "publicDisclosure": false
+        }
+      },
+      "forbidden": [
+        "INFO:medicine_key_public",
+        "qiwen knows medicine_key_in_east_cabinet",
+        "waiting_patients know medicine_key_in_east_cabinet",
+        "publicDisclosure=true"
+      ]
+    },
+    {
+      "id": "prose-state-consistency-01",
+      "heldOut": false,
+      "dimension": "prose_state_consistency",
+      "vocabulary": {
+        "actors": ["helan"],
+        "facts": ["generator_reading:0", "generator_started"],
+        "generator": ["off", "on"],
+        "fuelValve": ["closed", "open"]
+      },
+      "context": "浮桥营地的备用发电机未启动，燃料阀关闭，仪表读数为0；守夜人禾岚在旁边。",
+      "playerInput": "我只查看仪表并把读数0告诉禾岚；不启动发电机，也不打开燃料阀。",
+      "expected": {
+        "token": "STATE:generator_off_valve_closed",
+        "boolean": {
+          "generatorStarted": false,
+          "fuelValveOpen": false,
+          "readingReported": true
+        },
+        "actorKnownFacts": {
+          "helan": [
+            "generator_reading:0"
+          ]
+        },
+        "stateFacts": {
+          "generator": "off",
+          "fuelValve": "closed",
+          "meterReading": 0
+        }
+      },
+      "forbidden": [
+        "STATE:generator_started",
+        "generatorStarted=true",
+        "fuelValveOpen=true",
+        "helan knows generator_started",
+        "meterReading=nonzero"
+      ]
+    },
+    {
+      "id": "player-major-decision-01",
+      "heldOut": true,
+      "dimension": "player_major_decision",
+      "vocabulary": {
+        "actors": ["dafu"],
+        "facts": ["both_documents_unsigned"],
+        "withdrawal": ["unsigned", "signed", "destroyed"],
+        "complaint": ["unsigned", "signed", "destroyed"],
+        "playerDecision": ["pending", "withdrawal", "complaint"],
+        "documents": ["separated_on_table", "destroyed"]
+      },
+      "context": "白榆城仲裁室里，撤诉书和起诉书都在桌上且未签字；玩家尚未决定选择哪一份。",
+      "playerInput": "把两份文件分开放在桌面，请妲芙解释后果；本回合不签署、不撕毁，不替玩家作决定。",
+      "expected": {
+        "token": "DECISION:pending",
+        "boolean": {
+          "withdrawalSigned": false,
+          "complaintSigned": false,
+          "playerDecisionMade": false
+        },
+        "actorKnownFacts": {
+          "dafu": [
+            "both_documents_unsigned"
+          ]
+        },
+        "stateFacts": {
+          "withdrawal": "unsigned",
+          "complaint": "unsigned",
+          "playerDecision": "pending",
+          "documents": "separated_on_table"
+        }
+      },
+      "forbidden": [
+        "DECISION:withdrawal",
+        "DECISION:complaint",
+        "withdrawalSigned=true",
+        "complaintSigned=true",
+        "playerDecisionMade=true",
+        "documentsDestroyed=true"
+      ]
+    },
+    {
+      "id": "random-binding-result-01",
+      "heldOut": true,
+      "dimension": "random_binding_result",
+      "vocabulary": {
+        "randomResult": ["ROUTE_BLUE", "ROUTE_RED"],
+        "selectedRoute": ["blue_tunnel", "red_slope"]
+      },
+      "context": "云脊索道检修门前有蓝灯隧道和赤灯坡道；系统已锁定本回合随机结果为token ROUTE_BLUE，不能重抽。",
+      "playerInput": "按已锁定的随机结果选择路线，让正文和状态使用同一个结果；不要重抽。",
+      "expected": {
+        "token": "ROUTE_BLUE",
+        "boolean": {
+          "blueTunnelSelected": true,
+          "redSlopeSelected": false,
+          "randomRedrawn": false
+        },
+        "actorKnownFacts": {},
+        "stateFacts": {
+          "randomResult": "ROUTE_BLUE",
+          "selectedRoute": "blue_tunnel",
+          "randomRedrawn": false
+        }
+      },
+      "forbidden": [
+        "randomResult=ROUTE_RED",
+        "selectedRoute=red_slope",
+        "randomRedrawn=true",
+        "RANDOM:rerolled"
+      ]
+    }
+  ]
+}

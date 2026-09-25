@@ -13,7 +13,7 @@ describe("neutral controlled spawn seam", () => {
       [
         "-e",
         // 8 行 × 200KB = 1.6MB，远超 64KB 尾部上限；行必须完整到达回调
-        'const big = "x".repeat(200 * 1024); for (let i = 0; i < 8; i++) console.log(big);',
+        'const fs = require("node:fs"); const big = "x".repeat(200 * 1024); for (let i = 0; i < 8; i++) fs.writeSync(1, big + "\\n");',
       ],
       {
         cwd: process.cwd(),
@@ -34,7 +34,7 @@ describe("neutral controlled spawn seam", () => {
   it("回调抛异常不炸主链路（spawn 仍完成并保留 stdout）", async () => {
     const res = await defaultSpawn(
       process.execPath,
-      ["-e", 'console.log("line-a"); console.log("line-b");'],
+      ["-e", 'const fs = require("node:fs"); fs.writeSync(1, "line-a\\n"); fs.writeSync(1, "line-b\\n");'],
       {
         cwd: process.cwd(),
         env: { PATH: process.env.PATH },

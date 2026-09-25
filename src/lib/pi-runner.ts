@@ -7,18 +7,21 @@ import {
   PI_INIT_CONCEPTS_SYSTEM_PROMPT,
   PI_INIT_OPENING_SYSTEM_PROMPT,
   PI_TURN_SYSTEM_PROMPT,
+  PI_SCENE_PLAN_SYSTEM_PROMPT,
   buildInitConceptsUserPrompt,
   buildInitOpeningUserPrompt,
   buildTurnUserPrompt,
 } from "./pi-prompt";
-import { parseStateUpdate, applyStateUpdates, type RollDeclaration } from "./state-update";
+import type { FactLedger } from "./fact-ledger";
+import { parseStateUpdate, applyStateUpdates } from "./state-update";
 import { applyInitWorkspaceBundle, parseInitWorkspaceBundle } from "./init-bundle";
 import {
   captureWorkspaceManifest,
   findUnauthorizedWorkspaceChange,
   type WorkspaceManifest,
 } from "./workspace-manifest";
-import { generateRollPool, recordPoolRoll, type RollChoiceRng } from "./random-tool";
+import { recordPoolRoll, type RollChoiceRng } from "./random-tool";
+import { bindTurnRolls, bindingRollContext, validateBoundRolls, type BoundTurnRoll } from "./turn-rolls";
 import { sanitizeForLog } from "./diagnostics";
 import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
 import { validateTurnOutput } from "./turn-output";
@@ -26,42 +29,36 @@ import { readTurnInteractionRawLine } from "./turn-interaction";
 import { sanitizeTurnInteraction } from "./interaction-schema";
 import { beginTurnAttempt, publishTurnProgress } from "./turn-progress";
 import { startPollWatcher, type PollWatchHandle } from "./poll-watcher";
+import { parseScenePlan, buildSceneRenderContext, SCENE_RENDER_SYSTEM_PROMPT } from "./scene-plan";
+import { createPiResponseCollector, parseResponseJson, parseResponseOutput, parseTurnResponse } from "./pi-response";
+import { parsePublicSceneFromPlayer } from "./public-scene";
 
 /**
  * pi Coding Agent Runner（性能优化分支，task=turn/init 共用）。
  *
  * 执行模型（与 ClaudeCodeRunner 的 agent 自主读写不同）：
  * 1. 服务端预注入全部上下文（pi-prompt.ts），模型禁止读文件
- * 2. turn 由 pi 并行写 3 个产物；init 分为概念 Bundle 与 opening 两阶段，
+ * 2. turn 由 pi 返回一个完整 JSON，程序校验后统一写入；init 分为概念 Bundle 与 opening 两阶段，
  *    两阶段各有独立写白名单，避免开场叙事读取/泄漏隐藏设定。
  * 3. 服务端后处理：解析合并 state-update → 随机判定申报落账 → 写 done.json
  *    （磁盘权威不变，由 Web 侧而非模型写入）→ orchestrator 走既有的校验/提交/回滚链路
  *
- * 可靠性装甲（实测 1/6 概率 qwen"口述不写盘"）：必需产物缺失或无效时自动重试
+ * 普通 turn 禁用全部模型工具，不再依赖模型写盘；完整响应缺失或无效时自动重试
  * （PI_MAX_ATTEMPTS，默认 2，上限 3）。重试在同一快照窗口内，无半成品风险
  * （pi 未写任何文件或只写了部分文件，后续整体回滚/覆盖语义不受影响）。
  *
- * 随机判定（roll-choice，Issue 5）：pi 禁 bash，无法调 roll-choice CLI；
- * 等价物为预掷随机数池——服务端 crypto 预生成池注入 prompt，模型按序消耗
- * 并在 state-update.md 申报，服务端用自持样本重算权威结果落账审计日志
- * （random-tool.ts recordPoolRoll）。信任等级与 claude 路径对齐。
+ * 风险判定先提交候选请求，服务端随后抽样并绑定结果，再生成叙事；
+ * 模型不接触样本。状态和随机确认严格验证后才写 done，失败交给 Orchestrator 回滚。
  */
 
 const DEFAULT_PI_PATH = "pi";
 const SIGKILL_GRACE_MS = 5_000;
-/** 每回合预掷样本数（超时叙事权衡兜底，池在 runTurn 内跨重试固定） */
-const ROLL_POOL_SIZE = 6;
 /** 早退看门狗轮询间隔 */
 const WATCH_INTERVAL_MS = 200;
 /** Candidate artifact paths for each execution plan. */
-const TURN_ALLOWED_ARTIFACTS = [
-  "turn/output.md",
-  "turn/interaction.json",
-  "turn/state-update.md",
-] as const;
 const INIT_CONCEPT_ALLOWED_ARTIFACTS = ["turn/state-update.md"] as const;
 const INIT_OPENING_ALLOWED_ARTIFACTS = ["turn/output.md", "turn/interaction.json"] as const;
-type PiPhase = "turn" | "init-concepts" | "init-opening";
+type PiPhase = "turn" | "turn-plan" | "turn-render" | "init-concepts" | "init-opening";
 const DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH = path.resolve(
   process.cwd(),
   "pi-extensions/write-boundary.ts",
@@ -91,12 +88,15 @@ function resolvePiWriteBoundaryExtensionPath(): string {
   return path.resolve(configured || DEFAULT_PI_WRITE_BOUNDARY_EXTENSION_PATH);
 }
 
+function resolvePiResponseExtensionPath(): string {
+  return path.resolve(process.env.PI_RESPONSE_EXTENSION_PATH?.trim() || "pi-extensions/json-response.ts");
+}
+
 /**
  * The write boundary is a fail-closed startup prerequisite. The extension is
  * the pre-execution guard; Pi must never start without a readable copy of it.
  */
-async function ensurePiWriteBoundaryExtension(): Promise<string | null> {
-  const extensionPath = resolvePiWriteBoundaryExtensionPath();
+async function ensureReadableExtension(extensionPath: string): Promise<string | null> {
   try {
     const stat = await fs.stat(extensionPath);
     if (!stat.isFile()) return null;
@@ -113,20 +113,6 @@ async function writeDoneMarker(workspaceDir: string): Promise<void> {
     path.join(workspaceDir, "turn", "done.json"),
     JSON.stringify({ status: "success", completedAt: new Date().toISOString() }) + "\n",
   );
-}
-
-/**
- * 读取回合产物。占位残留（createStory 写入的模板）视同未写——
- * "口述不写盘"失效模式下模型一个文件都不落，不能让占位文件蒙混过关。
- */
-async function readOutputIfExists(workspaceDir: string): Promise<string | null> {
-  try {
-    const raw = await fs.readFile(path.join(workspaceDir, "turn", "output.md"), "utf8");
-    if (raw.trim() === "" || raw.trim() === TURN_OUTPUT_PLACEHOLDER.trim()) return null;
-    return raw;
-  } catch {
-    return null;
-  }
 }
 
 /** 渐进 kill：SIGTERM → 宽限 → SIGKILL。与 claude-code-runner 同策略。 */
@@ -202,31 +188,18 @@ async function turnArtifactsComplete(
     return freshFileOk(
       path.join(turnDir, "state-update.md"),
       baselines.stateUpdate,
-      (raw) => parseInitWorkspaceBundle(raw).ok,
+      (raw) => {
+        const bundle = parseInitWorkspaceBundle(raw);
+        if (!bundle.ok) return false;
+        try { parsePublicSceneFromPlayer(bundle.files.find(file => file.path === "player.md")?.content ?? ""); return true; }
+        catch { return false; }
+      },
     );
   }
   if (phase === "init-opening") {
     return (await validateInitOpeningArtifacts(workspaceDir, baselines)).ok;
   }
-  const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
-    const first = raw.split("\n").find((l) => l.trim() !== "");
-    return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
-  });
-  if (!outputOk) return false;
-  const interactionOk = await freshFileOk(
-    path.join(turnDir, "interaction.json"),
-    baselines.interaction,
-    (raw) => {
-      try {
-        JSON.parse(raw);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  );
-  if (!interactionOk) return false;
-  return freshFileOk(path.join(turnDir, "state-update.md"), baselines.stateUpdate, () => true);
+  return false; // Response-only turns never finish from disk artifacts.
 }
 
 /** mtime 严格新于基线；基线 null（attempt 前不存在）时任何存在都算新 */
@@ -237,28 +210,6 @@ async function mtimeFresherThan(file: string, baseline: number | null): Promise<
   } catch {
     return false;
   }
-}
-
-/** 成功路径新鲜度门：output（首行契约+非占位）与 interaction（可解析）均新于基线。
- * 普通 turn 的 interaction 兼容既有降级语义；init Phase 2 另走严格校验。 */
-async function turnCoreArtifactsFresh(
-  workspaceDir: string,
-  baselines: ArtifactMtimes,
-): Promise<boolean> {
-  const turnDir = path.join(workspaceDir, "turn");
-  const outputOk = await freshFileOk(path.join(turnDir, "output.md"), baselines.output, (raw) => {
-    const first = raw.split("\n").find((l) => l.trim() !== "");
-    return first?.trim() === "# 主角视窗" && raw.trim() !== TURN_OUTPUT_PLACEHOLDER.trim();
-  });
-  if (!outputOk) return false;
-  return freshFileOk(path.join(turnDir, "interaction.json"), baselines.interaction, (raw) => {
-    try {
-      JSON.parse(raw);
-      return true;
-    } catch {
-      return false;
-    }
-  });
 }
 
 interface InitOpeningValidation {
@@ -329,6 +280,17 @@ interface PiAttemptResult {
   unauthorized?: string;
   manifestError?: unknown;
   artifactBaselines: ArtifactMtimes;
+  responseText?: string;
+  responseError?: string;
+}
+
+function findUnsupportedWorkspaceEntry(manifest: WorkspaceManifest): string | null {
+  for (const [relative, entry] of manifest) {
+    if (entry.kind === "symlink" || entry.kind === "other") {
+      return `pre-existing ${entry.kind}: ${relative}`;
+    }
+  }
+  return null;
 }
 
 /** Run one phase attempt and perform the post-spawn manifest check first. */
@@ -340,11 +302,12 @@ async function executePiAttempt(input: {
   phase: PiPhase;
   allowedPaths: readonly string[];
   token: number;
+  response?: boolean;
 }): Promise<PiAttemptResult> {
   const { req, spawnFn, piPath, args, phase, allowedPaths, token } = input;
   const artifactBaselines = await statArtifactMtimes(req.workspaceDir);
   let manifestBefore: WorkspaceManifest | undefined;
-  if (phase !== "turn") {
+  {
     try {
       manifestBefore = await captureWorkspaceManifest(req.workspaceDir);
     } catch (err) {
@@ -352,20 +315,22 @@ async function executePiAttempt(input: {
     }
   }
 
+  const collector = input.response ? createPiResponseCollector() : undefined;
   const spawnOpts: SpawnOpts = {
     cwd: req.workspaceDir,
     env: buildPiEnv(allowedPaths),
     signal: req.signal,
     stdinData: "",
     stdio: ["pipe", "pipe", "pipe"],
-    onStdoutLine: makePiEventHandler(req, token, phase),
+    // Candidates are not player-visible until Orchestrator commits the whole turn.
+    onStdoutLine: collector ? collector.onLine : process.env.PI_UNCOMMITTED_PREVIEW === "1" && phase !== "turn-plan" && phase !== "turn-render" ? makePiEventHandler(req, token, phase) : undefined,
   };
   let clearKillTimer: (() => void) | undefined;
   const onAbort = () => {
     clearKillTimer = killChildGradual(spawnOpts._child);
   };
   req.signal.addEventListener("abort", onAbort);
-  const watcher = startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, phase);
+  const watcher = input.response ? { stop() {}, fired: false } : startEarlyExitWatcher(spawnOpts, req.workspaceDir, artifactBaselines, phase);
 
   let result: SpawnResult | undefined;
   let spawnError: unknown;
@@ -389,6 +354,12 @@ async function executePiAttempt(input: {
       manifestError = err;
     }
   }
+  let responseText: string | undefined;
+  let responseError: string | undefined;
+  if (collector && result) {
+    try { responseText = collector.finish(result.stdout); }
+    catch (error) { responseError = String(error); }
+  }
   return {
     result,
     spawnError,
@@ -396,6 +367,8 @@ async function executePiAttempt(input: {
     unauthorized,
     manifestError,
     artifactBaselines,
+    responseText,
+    responseError,
   };
 }
 
@@ -407,8 +380,13 @@ function buildPiArgs(
   return [
     "-p",
     "--no-session",
+    "--no-context-files",
+    "--no-skills",
+    "--no-prompt-templates",
     "--mode",
     "json",
+    "--provider",
+    "newapi",
     "--model",
     resolvePiModel(),
     "--tools",
@@ -422,44 +400,83 @@ function buildPiArgs(
   ];
 }
 
+function buildResponseArgs(systemPrompt: string, userPrompt: string): string[] {
+  return ["-p", "--no-session", "--no-tools", "--no-extensions", "--no-context-files",
+    "--extension", resolvePiResponseExtensionPath(),
+    "--no-skills", "--no-prompt-templates", "--mode", "json", "--provider", "newapi-response",
+    // Pi 0.73.1 的最高合法档名是 xhigh；对 DeepSeek 即产品侧 max 档。
+    "--thinking", "xhigh", "--model", resolvePiModel(),
+    "--system-prompt", systemPrompt, userPrompt];
+}
+
 export class PiRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly piPath: string;
   private readonly rollRng?: RollChoiceRng;
+  private readonly separateScene: boolean;
+  private readonly experimentalFactLedger?: FactLedger;
 
-  constructor(opts?: { spawnFn?: SpawnFn; piPath?: string; rollRng?: RollChoiceRng }) {
+  constructor(opts?: {
+    spawnFn?: SpawnFn;
+    piPath?: string;
+    rollRng?: RollChoiceRng;
+    experimentalSceneSeparation?: boolean;
+    experimentalFactLedger?: FactLedger;
+  }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.piPath = opts?.piPath ?? process.env.PI_PATH?.trim() ?? DEFAULT_PI_PATH;
     this.rollRng = opts?.rollRng;
+    this.separateScene = opts?.experimentalSceneSeparation ?? false;
+    this.experimentalFactLedger = opts?.experimentalFactLedger;
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     req.signal.throwIfAborted();
-    const writeBoundaryExtensionPath = await ensurePiWriteBoundaryExtension();
-    if (writeBoundaryExtensionPath === null) {
-      return {
-        success: false,
-        error: "pi write boundary extension unavailable",
-        detail: `required readable extension: ${resolvePiWriteBoundaryExtensionPath()}`,
-      };
-    }
     await ensurePiConfig();
     const task = req.task ?? "turn";
-    if (task === "init") return this.runInitPhases(req, writeBoundaryExtensionPath);
+    if (task === "init") {
+      const extension = await ensureReadableExtension(resolvePiWriteBoundaryExtensionPath());
+      if (!extension) return { success: false, error: "pi write boundary extension unavailable", detail: `required readable extension: ${resolvePiWriteBoundaryExtensionPath()}` };
+      return this.runInitPhases(req, extension);
+    }
 
-    const rollPool = generateRollPool(ROLL_POOL_SIZE, this.rollRng);
+    if (!await ensureReadableExtension(resolvePiResponseExtensionPath())) {
+      return { success: false, error: "pi JSON response extension unavailable" };
+    }
+
+    let initialManifest: WorkspaceManifest;
+    try {
+      initialManifest = await captureWorkspaceManifest(req.workspaceDir);
+    } catch (err) {
+      return {
+        success: false,
+        error: "pi turn workspace manifest failed",
+        detail: sanitizeForLog(err instanceof Error ? err.message : String(err)),
+      };
+    }
+    const unsupportedEntry = findUnsupportedWorkspaceEntry(initialManifest);
+    if (unsupportedEntry !== null) {
+      return {
+        success: false,
+        error: "pi turn workspace write boundary violated",
+        detail: unsupportedEntry,
+      };
+    }
+
     const userPrompt = await buildTurnUserPrompt(
       req.workspaceDir,
       req.storyId,
       req.playerInput,
-      rollPool,
+      this.experimentalFactLedger,
     );
-    const args = buildPiArgs(writeBoundaryExtensionPath, PI_TURN_SYSTEM_PROMPT, userPrompt);
+    let boundRolls: BoundTurnRoll[] | undefined;
 
     const diagnostics: string[] = [];
     const maxAttempts = resolveMaxAttempts();
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let attemptsRemaining = maxAttempts;
+    for (let attempt = 1; attemptsRemaining > 0; attempt++) {
+      attemptsRemaining--;
       req.signal.throwIfAborted();
       // 重试重开时相位回退到 generating——turn-progress 清空已发布预览，
       // 前端撤回叙事显示回到等待态；attempt 令牌发放后，旧 attempt 迟到
@@ -470,12 +487,18 @@ export class PiRunner implements AgentRunner {
         req,
         spawnFn: this.spawnFn,
         piPath: this.piPath,
-        args,
-        phase: "turn",
-        allowedPaths: TURN_ALLOWED_ARTIFACTS,
+        args: buildResponseArgs(this.separateScene ? PI_SCENE_PLAN_SYSTEM_PROMPT : PI_TURN_SYSTEM_PROMPT,
+          [userPrompt, boundRolls ? bindingRollContext(boundRolls) : "", diagnostics.length ? `上次完整响应未通过，请修正：${diagnostics.at(-1)}` : ""].join("\n\n")),
+        phase: this.separateScene ? "turn-plan" : "turn",
+        allowedPaths: [],
         token: attemptToken,
+        response: true,
       });
-      const { result, spawnError, watcherFired } = attemptResult;
+      const { result, spawnError } = attemptResult;
+
+      if (attemptResult.manifestError || attemptResult.unauthorized) {
+        return { success: false, error: "pi turn workspace write boundary violated", detail: sanitizeForLog(String(attemptResult.unauthorized ?? attemptResult.manifestError)) };
+      }
 
       if (spawnError !== undefined) {
         return {
@@ -491,76 +514,134 @@ export class PiRunner implements AgentRunner {
       if (result.aborted || req.signal.aborted) {
         return { success: false, error: "aborted", detail: sanitizeForLog(result.stderr).slice(0, 2000) };
       }
-      if (result.code !== 0 && !watcherFired) {
+      if (attemptResult.responseError || !attemptResult.responseText) {
+        diagnostics.push(`attempt ${attempt}: ${attemptResult.responseError ?? "complete response missing"}`);
+        continue;
+      }
+      let value: unknown;
+      try { value = parseResponseJson(attemptResult.responseText); }
+      catch (error) { diagnostics.push(`attempt ${attempt}: ${String(error)}`); continue; }
+      if (value && typeof value === "object" && (value as { kind?: unknown }).kind === "roll-request") {
+        if (boundRolls) return { success: false, error: "random candidates already bound" };
+        let requestRaw: string;
+        let nextBoundRolls: BoundTurnRoll[];
+        try {
+          const request = parseTurnResponse(attemptResult.responseText);
+          if (request.kind !== "roll-request") throw new Error("invalid random request");
+          requestRaw = JSON.stringify({ rolls: request.rolls });
+          nextBoundRolls = bindTurnRolls(requestRaw, req.storyId, req.workspaceDir, this.rollRng);
+        } catch (err) {
+          diagnostics.push(`attempt ${attempt}: invalid roll request: ${sanitizeForLog(String(err))}`);
+          continue;
+        }
+        try {
+          await fs.writeFile(path.join(req.workspaceDir, "turn/roll-request.json"), requestRaw);
+        } catch (err) {
+          return {
+            success: false,
+            error: "random request persistence failed",
+            detail: sanitizeForLog(String(err)).slice(0, 2000),
+          };
+        }
+        boundRolls = nextBoundRolls;
+        // Resolving a valid request is a phase transition, not a failed attempt.
+        attemptsRemaining = maxAttempts;
+        continue;
+      }
+
+      if (result.code !== 0) {
         diagnostics.push(
           `attempt ${attempt}: pi exit=${result.code}\n${sanitizeForLog(result.stdout + "\n" + result.stderr).slice(0, 2000)}`,
         );
         continue;
       }
-      if (watcherFired) {
-        diagnostics.push(`attempt ${attempt}: early-exit fired (artifacts complete, skip final round-trip)`);
+
+      let candidate: { output: string; interaction: import("./interaction-schema").TurnInteraction; stateUpdate: string };
+      if (this.separateScene) {
+        try {
+          const scene = parseScenePlan(JSON.stringify(value));
+          const updates = parseStateUpdate(scene.stateUpdate);
+          if (updates.problems.length) throw new Error(updates.problems.join("; "));
+          validateBoundRolls(boundRolls ?? [], updates.rolls);
+          const renderContext = await buildSceneRenderContext(req.workspaceDir, scene);
+          let output: string | undefined;
+          for (let renderAttempt = 0; renderAttempt < maxAttempts; renderAttempt++) {
+            req.signal.throwIfAborted();
+            const rendering = await executePiAttempt({ req, spawnFn: this.spawnFn, piPath: this.piPath,
+              args: buildResponseArgs(SCENE_RENDER_SYSTEM_PROMPT, renderContext),
+              phase: "turn-render", allowedPaths: [], response: true, token: beginTurnAttempt(req.storyId) });
+            if (rendering.unauthorized || rendering.manifestError || rendering.spawnError || req.signal.aborted) throw new Error("scene rendering failed or crossed write boundary");
+            if (rendering.result && !rendering.result.aborted && rendering.result.code === 0 && rendering.responseText) {
+              try {
+                const rendered = parseResponseJson(rendering.responseText) as Record<string, unknown>;
+                if (!rendered || rendered.kind !== "render" || Object.keys(rendered).some(k => !["kind", "output"].includes(k)) || typeof rendered.output !== "string") throw new Error("invalid render response");
+                const prose = parseResponseOutput(rendered.output);
+                const problem = validateTurnOutput(prose, []);
+                if (problem) throw new Error(problem);
+                output = prose;
+                break;
+              } catch { /* Retry rendering without replanning or resampling. */ }
+            }
+          }
+          if (!output) throw new Error("scene rendering produced no valid output");
+          candidate = { output, stateUpdate: scene.stateUpdate, interaction: scene.interaction };
+          await fs.writeFile(path.join(req.workspaceDir, "turn/scene-plan.json"), JSON.stringify(scene));
+        } catch (err) {
+          return { success: false, error: "experimental scene turn failed", detail: sanitizeForLog(String(err)) };
+        }
+      } else {
+        try {
+          const parsed = parseTurnResponse(attemptResult.responseText);
+          if (parsed.kind !== "turn") throw new Error("expected complete turn");
+          candidate = parsed;
+        } catch (error) { diagnostics.push(`attempt ${attempt}: ${String(error)}`); continue; }
       }
 
-      // 新鲜度守卫：口述失效模式（1/6 flake）下 pi 退出码 0 但不写盘，
-      // turn/ 下残留的是上一回合产物——不拦会把旧回合 output/interaction
-      // 当本回合提交（实测复现：连续两回合输出与上一回合一字不差）。
-      // output/interaction 必须新于 attempt 前基线；早退看门狗 fire 过的
-      // 天然新鲜，自然退出的在此复验。state-update 不设硬门（契约容许
-      // 降级缺席），但旧文件不得重放——下方合并步骤单独校验。
-      if (!watcherFired && !(await turnCoreArtifactsFresh(req.workspaceDir, attemptResult.artifactBaselines))) {
-        diagnostics.push(
-          `attempt ${attempt}: pi exit=${result.code} but turn artifacts stale/missing (dictation flake?)`,
-        );
-        continue;
-      }
-
-      const output = await readOutputIfExists(req.workspaceDir);
-      if (output === null) {
-        // "口述不写盘"失效模式：重试（最后一次尝试的诊断由下方汇总）
-        diagnostics.push(
-          `attempt ${attempt}: pi exit=${result.code} but turn/output.md missing\n${sanitizeForLog(result.stdout).slice(0, 2000)}`,
-        );
-        continue;
-      }
-
-      // 成功：合并状态更新 + 落账随机判定（均降级不致命）→ 服务端写 done.json
-      const mergeDiags: string[] = [];
-      let rolls: RollDeclaration[] = [];
+      // Validate all candidate changes before committing any state or audit log.
       try {
         const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
-        const stateFresh = await mtimeFresherThan(
-          stateUpdatePath,
-          attemptResult.artifactBaselines.stateUpdate,
-        );
-        if (!stateFresh) {
-          // 缺席（容许，降级）或残留旧文件（禁止重放——旧状态重复 APPEND
-          // 会污染状态文件）。两种情况都跳过合并，只记诊断。
-          mergeDiags.push("state-update.md absent or stale; skipped (degraded)");
-        } else {
-          const raw = await fs.readFile(stateUpdatePath, "utf8");
-          const parsed = parseStateUpdate(raw);
-          rolls = parsed.rolls;
-          mergeDiags.push(...parsed.problems);
-          const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
-          mergeDiags.push(...applied.errors);
+        const raw = candidate.stateUpdate;
+        const parsed = parseStateUpdate(raw);
+        if (parsed.problems.length) throw new Error(parsed.problems.join("; "));
+        validateBoundRolls(boundRolls ?? [], parsed.rolls);
+        const interactionRaw = JSON.stringify(candidate.interaction);
+        const problem = validateTurnOutput(candidate.output, await readRandomRollLines(req.storyId), [
+          ...buildInteractionFingerprints(interactionRaw),
+          ...parsed.rolls.flatMap((roll) => [
+            JSON.stringify(roll),
+            `R${roll.index}: rollId=${roll.rollId} candidates=${roll.candidates.map((c) => `${c.id}:${c.weight}`).join(",")} → ${roll.declaredSelectedId}`,
+          ]),
+          ...raw.split("\n").map((line) => line.trim()).filter((line) => /^R\d+:/.test(line)),
+        ]);
+        if (problem) throw new Error(problem);
+        const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
+        if (applied.errors.length) {
+          // Returned validation errors guarantee zero writes. Only this case
+          // may regenerate against the same state and frozen random outcomes.
+          // Thrown I/O errors can follow partial writes and must roll back.
+          if (attemptsRemaining > 0) {
+            diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(applied.errors.join("; ")).slice(0, 2000)}`);
+            continue;
+          }
+          throw new Error(applied.errors.join("; "));
         }
-      } catch {
-        mergeDiags.push("state-update.md missing or unparseable; skipped (degraded)");
+        await fs.writeFile(stateUpdatePath, raw);
+        await fs.writeFile(path.join(req.workspaceDir, "turn/output.md"), candidate.output);
+        await fs.writeFile(path.join(req.workspaceDir, "turn/interaction.json"), interactionRaw);
+        for (const roll of boundRolls ?? []) {
+          await recordPoolRoll({ storyId: req.storyId, workspaceDir: req.workspaceDir, ...roll, declaredSelectedId: roll.selectedId });
+        }
+      } catch (err) {
+        // Never retry after state application: Orchestrator restores the snapshot.
+        return { success: false, error: "turn candidate validation or commit failed", detail: sanitizeForLog(String(err)).slice(0, 2000) };
       }
-      mergeDiags.push(...(await recordRollDeclarations(req, rollPool, rolls)));
       await writeDoneMarker(req.workspaceDir);
-      const notes: string[] = [];
-      if (watcherFired) notes.push("early-exit fired (skipped final round-trip)");
-      if (mergeDiags.length > 0) notes.push(`state-update notes: ${mergeDiags.join("; ").slice(0, 2000)}`);
-      return {
-        success: true,
-        detail: notes.length > 0 ? notes.join("; ") : undefined,
-      };
+      return { success: true };
     }
 
     return {
       success: false,
-      error: `pi produced no turn output after ${maxAttempts} attempt(s)`,
+      error: `pi produced no turn response after ${maxAttempts} attempt(s)`,
       detail: sanitizeForLog(diagnostics.join("\n---\n")).slice(0, 4000),
     };
   }
@@ -569,11 +650,6 @@ export class PiRunner implements AgentRunner {
     const maxAttempts = resolveMaxAttempts();
     const diagnostics: string[] = [];
     const conceptsPrompt = await buildInitConceptsUserPrompt(req.workspaceDir, req.playerInput);
-    const conceptsArgs = buildPiArgs(
-      extensionPath,
-      PI_INIT_CONCEPTS_SYSTEM_PROMPT,
-      conceptsPrompt,
-    );
 
     let conceptsApplied = false;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -583,7 +659,8 @@ export class PiRunner implements AgentRunner {
         req,
         spawnFn: this.spawnFn,
         piPath: this.piPath,
-        args: conceptsArgs,
+        args: buildPiArgs(extensionPath, PI_INIT_CONCEPTS_SYSTEM_PROMPT,
+          diagnostics.length ? `${conceptsPrompt}\n\n上次候选未通过校验，请修复后重新写完整 Bundle：\n${diagnostics.at(-1)}` : conceptsPrompt),
         phase: "init-concepts",
         allowedPaths: INIT_CONCEPT_ALLOWED_ARTIFACTS,
         token,
@@ -625,7 +702,7 @@ export class PiRunner implements AgentRunner {
         );
         continue;
       }
-      if (!watcherFired && !(await turnArtifactsComplete(req.workspaceDir, attemptResult.artifactBaselines, "init-concepts"))) {
+      if (!(await mtimeFresherThan(path.join(req.workspaceDir, "turn/state-update.md"), attemptResult.artifactBaselines.stateUpdate))) {
         diagnostics.push(`phase 1 attempt ${attempt}: init bundle missing or stale`);
         continue;
       }
@@ -641,6 +718,12 @@ export class PiRunner implements AgentRunner {
       const parsedBundle = parseInitWorkspaceBundle(rawBundle);
       if (!parsedBundle.ok) {
         diagnostics.push(`phase 1 attempt ${attempt}: ${parsedBundle.error}`);
+        continue;
+      }
+      try {
+        parsePublicSceneFromPlayer(parsedBundle.files.find(file => file.path === "player.md")?.content ?? "");
+      } catch (error) {
+        diagnostics.push(`phase 1 attempt ${attempt}: invalid Public Scene: ${String(error)}`);
         continue;
       }
       try {
@@ -745,48 +828,6 @@ export class PiRunner implements AgentRunner {
       detail: sanitizeForLog(openingDiagnostics.join("\n---\n")).slice(0, 4000),
     };
   }
-}
-
-/**
- * 落账随机数池消耗申报。严格按 R1,R2,… 顺序核对：乱序条目跳过且不消耗
- * 号位（防挑号——想用 R3 必须先申报消耗 R1/R2，且各自独立落账审计）；
- * 顺序正确但无法落账的（超池/校验失败）视为已消耗，只记诊断 note。
- * 单条失败一律降级，不影响回合成败。
- */
-async function recordRollDeclarations(
-  req: TurnRequest,
-  rollPool: number[],
-  rolls: RollDeclaration[],
-): Promise<string[]> {
-  const notes: string[] = [];
-  let expected = 1;
-  for (const decl of rolls) {
-    if (decl.index !== expected) {
-      notes.push(`roll skipped (out of order): R${decl.index}, expected R${expected}`);
-      continue;
-    }
-    expected++;
-    if (decl.index > rollPool.length) {
-      notes.push(`roll skipped (pool exhausted): R${decl.index}`);
-      continue;
-    }
-    try {
-      const { result, mismatch } = await recordPoolRoll({
-        storyId: req.storyId,
-        workspaceDir: req.workspaceDir,
-        rollId: decl.rollId,
-        sample: rollPool[decl.index - 1],
-        candidates: decl.candidates,
-        ...(decl.declaredSelectedId !== undefined ? { declaredSelectedId: decl.declaredSelectedId } : {}),
-      });
-      if (mismatch) {
-        notes.push(`roll ${decl.rollId}: declared ${decl.declaredSelectedId} but authoritative ${result.selectedId}`);
-      }
-    } catch (err) {
-      notes.push(`roll ${decl.rollId} failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  return notes;
 }
 
 /** pi json 事件流里 write 工具调用的最小形状（只取消费所需字段） */

@@ -1,5 +1,5 @@
 /** The only model authorized for real agent execution in this project. */
-export const REQUIRED_AGENT_MODEL = "qwen-fp8";
+export const REQUIRED_AGENT_MODEL = "deepseek-v4.1-flash";
 
 /**
  * Fail closed when configuration asks for another model.  An omitted setting

@@ -1,0 +1,56 @@
+{
+  "experiment": "complete-turn-vs-scene-separation",
+  "model": "qwen-fp8",
+  "repeatsPerArm": 3,
+  "automaticRetries": 0,
+  "arms": ["complete", "separated"],
+  "promotionGate": {
+    "separatedTechnicalPasses": 6,
+    "separatedSemanticPasses": 6,
+    "minimumSemanticGain": 2,
+    "allowNewMaterialError": false
+  },
+  "order": [
+    ["complete", "separated"],
+    ["separated", "complete"],
+    ["complete", "separated"]
+  ],
+  "cases": [
+    {
+      "id": "undisclosed-seal",
+      "dimension": "information-disclosure",
+      "title": "东廊封条",
+      "playerInput": "我把纸片收在内袋里，不拿出来，也不提封条、刻痕或我昨夜看见的东西。我只问岑雾：\"昨夜子时，你去过东廊吗？\"",
+      "opening": "# 主角视窗\n\n午后的旧档案馆里，岑雾隔着长桌整理借阅册。我独自知道昨夜东廊门缝里夹着一片蓝蜡，背面刻着代号 SEAL_7C；我没有告诉任何人，也没有展示纸片。",
+      "world": "# 世界\n\n当前时间是次日午后，地点是旧档案馆阅览室。东廊昨夜是否有人经过尚未查明。SEAL_7C 是评估用唯一证据代号。除主角外，没有角色见过或听说它。",
+      "player": "# 主角\n\n我是谨慎的档案员，第一人称限知叙事。遇到未核实证据时先试探，不擅自披露。\n\n## Protagonist Core\n- narrativeVoice：克制、具体，留意措辞与反应。\n- temperament：谨慎。\n- emotionalExpression：通过观察和简短内心判断表达。\n- conflictStyle：先问窄问题。\n- relationshipStyle：不轻易交底。\n- humorStyle：很少玩笑。\n- initiative：会主动调查。\n- moralBoundaries：不栽赃，不伪造。\n- speechPatterns：短句、直接。\n- avoidExpressions：空泛抒情。\n\n## Player Agency\n不得替玩家披露尚未选择公开的证据。\n\n## Public Scene\n```json\n{\"time\":\"次日午后\",\"location\":\"旧档案馆阅览室\",\"narrativeVoice\":\"第一人称，克制而具体\",\"knownFacts\":[\"主角独自知道蓝蜡纸片及代号 SEAL_7C\",\"主角尚未向任何人披露或展示证据\"],\"visibleActors\":[{\"name\":\"岑雾\",\"appearance\":\"灰外套，正在整理借阅册\",\"voice\":\"回答简短，先确认问题范围\"}]}\n```",
+      "actorFile": "岑雾.md",
+      "actor": "# 岑雾\n\n## 表面信息\n档案馆夜班管理员。没有见过、听说或推断出 SEAL_7C，也不知道主角持有证据。\n\n## Emotional Core\n- coreNeed：保住专业信誉。\n- coreFear：被无凭无据地指控。\n- vulnerability：工作记录遭质疑。\n- defensivePattern：要求对方把问题说清。\n- approachPattern：用可核查时间表回答。\n- retreatPattern：拒绝猜测。\n\n## Relationship State\n- surfaceRelationship：普通同事。\n- privateMeaning：主角的问题值得谨慎对待。\n- desiredPosition：专业合作。\n- perceivedPosition：尚未建立信任。\n- approachImpulse：提供自己确知的行程。\n- avoidanceImpulse：不替别人作证。\n- unresolvedQuestion：主角为何询问东廊。\n- currentTension：低。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：平静。\n- emotionalTrigger：主角询问昨夜行程。\n- emotionalConflict：愿意回答 vs 不想被暗示有嫌疑。\n- immediateGoal：弄清问题范围并如实回答。\n- hiddenIntent：保护自己的夜班记录。\n- restraint：不反过来指控主角。\n- behaviorStrategy：先回答，再追问原因。\n- voice：简短、精确。",
+      "semanticPass": [
+        "主角没有说出、展示或暗示蓝蜡、刻痕、纸片或 SEAL_7C",
+        "岑雾没有表现为已经知道该证据，也不依据该证据推理",
+        "提交后的任何状态没有把该证据写成岑雾已知或已被披露",
+        "正文确实执行了询问昨夜是否去过东廊"
+      ],
+      "advisoryTokens": ["SEAL_7C", "蓝蜡", "封条", "刻痕", "纸片"]
+    },
+    {
+      "id": "unsigned-choice",
+      "dimension": "player-major-decision",
+      "title": "两份调令",
+      "playerInput": "我不拿笔，也不碰两份调令。我明确说：\"先把驻港和随船各自会失去什么讲清楚。我现在不选，也不签。\"",
+      "opening": "# 主角视窗\n\n傍晚的航务室里，两份互斥调令摊在桌上：驻港一年，或随勘探船离港。签下任一份都会让另一条路关闭。闻策把笔放在两份调令之间，等待我的答复。",
+      "world": "# 世界\n\n当前时间是傍晚，地点是航务室。驻港与随船是互斥且不可逆的年度任命；只有主角亲笔签字才生效。当前两份调令都未签署，选择仍然开放。",
+      "player": "# 主角\n\n我是受命做选择的测绘员，第一人称限知叙事。重大职业决定由玩家明确作出。\n\n## Protagonist Core\n- narrativeVoice：清醒、具体。\n- temperament：审慎。\n- emotionalExpression：允许犹豫，不替犹豫下结论。\n- conflictStyle：先问代价。\n- relationshipStyle：能直接设边界。\n- humorStyle：压力下不玩笑。\n- initiative：主动索取信息。\n- moralBoundaries：不把沉默当承诺。\n- speechPatterns：明确区分询问与决定。\n- avoidExpressions：假装已经想通。\n\n## Player Agency\n驻港或随船、签署或拒签都属于玩家重大决定，系统不得代选。\n\n## Public Scene\n```json\n{\"time\":\"傍晚\",\"location\":\"航务室\",\"narrativeVoice\":\"第一人称，清醒而审慎\",\"knownFacts\":[\"两份调令互斥且签字后生效\",\"当前尚未签署或选择\"],\"visibleActors\":[{\"name\":\"闻策\",\"appearance\":\"制服袖口沾着海盐，笔放在桌面中央\",\"voice\":\"说话简洁，愿意说明实际代价\"}]}\n```",
+      "actorFile": "闻策.md",
+      "actor": "# 闻策\n\n## 表面信息\n航务官，负责解释两份调令，但无权替主角签署或宣布选择。\n\n## Emotional Core\n- coreNeed：让任命建立在知情选择上。\n- coreFear：有人事后声称被迫。\n- vulnerability：程序被当作形式。\n- defensivePattern：逐条说明后果。\n- approachPattern：回答具体问题。\n- retreatPattern：拒绝代选。\n\n## Relationship State\n- surfaceRelationship：工作关系。\n- privateMeaning：主角需要完整信息。\n- desiredPosition：可信的说明者。\n- perceivedPosition：正式而疏远。\n- approachImpulse：讲清两边代价。\n- avoidanceImpulse：不施压。\n- unresolvedQuestion：主角最终会选哪条路。\n- currentTension：任命期限临近。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：严肃。\n- emotionalTrigger：主角明确暂不选择。\n- emotionalConflict：期限紧迫 vs 必须尊重选择。\n- immediateGoal：说明两条路各自失去什么。\n- hiddenIntent：确认主角理解不可逆性。\n- restraint：不能催促或代签。\n- behaviorStrategy：分别列出实际代价，然后停下等待。\n- voice：简洁、具体。",
+      "semanticPass": [
+        "主角没有签署、拿笔、选择驻港或选择随船，也没有形成等价承诺",
+        "闻策只解释两条路的代价，没有替主角宣布结果或关闭选项",
+        "提交后的状态仍明确两份调令未签、选择开放",
+        "交互停在真正需要玩家选择的 decision 状态"
+      ],
+      "advisoryTokens": ["我签", "签下了", "我选择", "决定驻港", "决定随船", "调令生效"]
+    }
+  ]
+}

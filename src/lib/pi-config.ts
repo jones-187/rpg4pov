@@ -10,12 +10,13 @@ import { resolveAgentModel } from "./agent-model";
  * 声明 provider + 模型。本模块在 runner 启动时从 ANTHROPIC_* 环境变量
  * 幂等生成该文件（已存在且内容一致则跳过写入），密钥不进镜像、不进 git。
  *
- * 实测依据（2026-08 性能探索）：
- * - 走 NewAPI 的 OpenAI 兼容端点（/v1），thinkingFormat "qwen" 可下发
- *   enable_thinking 参数（Anthropic 端点会被网关吞掉）
- * - reasoning:false 是 3 工具并行成功那次跑的配置；:off 档会破坏 qwen
- *   工具调用可靠性（两次废回合实证），禁用
- * - 模型硬锁 qwen-fp8；冲突配置直接失败，不回退、不改用其他模型
+ * 实测依据（2026-08 性能探索，2026-09 模型切换）：
+ * - 走 NewAPI 的 OpenAI 兼容端点（/v1）；模型兼容格式必须显式声明，
+ *   因为自定义 provider/网关地址无法由 Pi 自动识别模型厂商。
+ * - 初始化保留 reasoning:false 的工具调用配置；普通无工具响应使用独立
+ *   provider 声明 reasoning 能力，由 CLI 显式选择推理开关。
+ * - 当前模型硬锁 deepseek-v4.1-flash；普通完整响应使用 DeepSeek
+ *   thinking 格式。冲突配置直接失败，不回退。
  */
 
 /** 兼容既有调用名；实际策略由共享的模型白名单负责。 */
@@ -41,22 +42,35 @@ function resolveApiKey(): string {
   return key;
 }
 
-/** 生成 models.json 内容（单一 provider，双保险不写多余模型） */
+/** 同一服务、同一锁定模型的两种协议配置；不修改初始化工具调用语义。 */
 export function buildPiModelsJson(): string {
+  const baseUrl = resolveOpenAiBaseUrl();
+  const apiKey = resolveApiKey();
+  const model = resolvePiModel();
   return JSON.stringify(
     {
       providers: {
         newapi: {
-          baseUrl: resolveOpenAiBaseUrl(),
+          baseUrl,
           api: "openai-completions",
-          apiKey: resolveApiKey(),
+          apiKey,
           models: [
             {
-              id: resolvePiModel(),
+              id: model,
               reasoning: false,
-              compat: { thinkingFormat: "qwen", supportsDeveloperRole: false },
+              compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
             },
           ],
+        },
+        "newapi-response": {
+          baseUrl,
+          api: "openai-completions",
+          apiKey,
+          models: [{
+            id: model,
+            reasoning: true,
+            compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
+          }],
         },
       },
     },

@@ -83,4 +83,55 @@ describe("Init Workspace Bundle", () => {
     );
     expect(parseInitWorkspaceBundle(incompleteMemory).ok).toBe(false);
   });
+
+  it("accepts bold headings and numbered memories when every memory has all fields", () => {
+    const numberedMemories = VALID_BUNDLE.replace(
+      "## Emotional Core\ncoreNeed: 被需要。",
+      "## **Emotional Core**\ncoreNeed: 被需要。",
+    )
+      .replace("## Relationship State: 主角", "## **Relationship State**: 主角")
+      .replace("## Emotionally Salient Memories\n（初始暂无。）", [
+        "## **Emotionally Salient Memories**",
+        "1. **event**: 旧事故",
+        "   **meaning**: 他仍未释怀。",
+        "   **impact**: 他不再轻信离开的人。",
+        "2. **event**: 一次守约",
+        "   **meaning**: 主角可能值得信任。",
+        "   **impact**: 他愿意再次求助。",
+      ].join("\n"))
+      .replace("## Current Intent", "## **Current Intent**");
+
+    expect(parseInitWorkspaceBundle(numberedMemories).ok).toBe(true);
+  });
+
+  it("does not borrow memory fields from a sibling Current Intent section", () => {
+    const memoryWithoutImpact = VALID_BUNDLE.replace(
+      "（初始暂无。）",
+      [
+        "### 1. 旧事故",
+        "- event: 旧事故",
+        "- meaning: 他仍未释怀。",
+        "",
+        "## Current Intent",
+        "impact: 这不是记忆字段。",
+      ].join("\n"),
+    );
+
+    expect(parseInitWorkspaceBundle(memoryWithoutImpact).ok).toBe(false);
+  });
+
+  it("validates event, meaning, and impact for each numbered memory", () => {
+    const incompleteSecondMemory = VALID_BUNDLE.replace(
+      "（初始暂无。）",
+      [
+        "1. event: 旧事故",
+        "   meaning: 他仍未释怀。",
+        "   impact: 他不再轻信离开的人。",
+        "2. event: 一次守约",
+        "   meaning: 主角可能值得信任。",
+      ].join("\n"),
+    );
+
+    expect(parseInitWorkspaceBundle(incompleteSecondMemory).ok).toBe(false);
+  });
 });

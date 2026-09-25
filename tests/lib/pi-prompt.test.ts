@@ -21,6 +21,7 @@ import {
 } from "@/lib/pi-config";
 import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { appendTurnHistory } from "@/lib/turn-history";
+import { parseFactLedger } from "@/lib/fact-ledger";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 beforeEach(async () => {
@@ -29,22 +30,46 @@ beforeEach(async () => {
 afterEach(() => resetWorkspaceRoot());
 
 describe("PI_TURN_SYSTEM_PROMPT", () => {
-  it("契约要素齐备：三文件写盘、红线、继续指令、首行标题", () => {
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("turn/output.md");
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("turn/interaction.json");
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("turn/state-update.md");
+  it("契约要求完整 JSON 响应、红线与继续指令，不要求模型写盘", () => {
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("kind");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("stateUpdate");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("# 主角视窗");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("【系统指令·继续】");
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止读取文件");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("不能读取或写入文件");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止修改 story.md");
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain("turn/output.md");
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain("turn/interaction.json");
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain("turn/state-update.md");
   });
 
-  it("随机判定契约：按序消耗、服从、RANDOM 申报、禁自造随机数", () => {
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("随机数池");
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("=== RANDOM ===");
-    expect(PI_TURN_SYSTEM_PROMPT).toContain("R1: rollId=lockpick");
+  it("随机判定契约：先请求候选、绑定后服从、结构化随机结果、禁自造随机数", () => {
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("roll-request");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("服务端绑定随机结果");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("不得再次请求随机");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("必须服从");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止自造随机数");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"sections"');
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"rolls"');
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"kind":"replace"');
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"from"');
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"id":"success","weight":25');
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"id":"fail","weight":75');
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain("=== RANDOM ===");
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain("R1: rollId=");
+  });
+
+  it("禁止凭空用期限或默认后果替玩家完成重大决定", () => {
+    expect(PI_TURN_SYSTEM_PROMPT).toContain(
+      "不得凭空新增截止时间、默认同意或拒绝、逾期自动失去选项",
+    );
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("暂不决定仍是未决定");
+  });
+
+  it("状态文件路径必须逐字复用上下文标题，禁止按角色显示名重建", () => {
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("file 必须逐字复制上下文中已有的文件标题");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("禁止翻译、改名或按角色显示名重建路径");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain('"file":"actors/existing-file.md"');
+    expect(PI_TURN_SYSTEM_PROMPT).not.toContain('"file":"actors/姓名.md"');
   });
 });
 
@@ -152,7 +177,7 @@ describe("PI_INIT_SYSTEM_PROMPT", () => {
     const dir = resolveWorkspaceDir(meta.storyId);
     await fs.writeFile(
       path.join(dir, "player.md"),
-      "# 主角\n\n## 初始状态\n站在门口。\n\n## 主角已知信息\n灯快熄了。\n\n## Protagonist Core\n声音克制。\n\n## Player Agency\n重大决定交还玩家。\n\n## 用户设定\n原始秘密设定不应注入。",
+      "# 主角\n\n## 初始状态\n站在门口。\n\n## Public Scene\n{\"time\":\"第一天清晨\",\"location\":\"灯塔门口\",\"narrativeVoice\":\"第一人称限知\",\"knownFacts\":[\"灯快熄了\"],\"visibleActors\":[{\"name\":\"守塔人\",\"appearance\":\"穿旧雨衣\",\"voice\":\"短句，少解释\"}]}\n\n## 主角已知信息\n灯快熄了。\n\n## Protagonist Core\n声音克制。\n\n## Player Agency\n重大决定交还玩家。\n\n## 用户设定\n原始秘密设定不应注入。",
     );
     await fs.writeFile(
       path.join(dir, "world.md"),
@@ -164,13 +189,14 @@ describe("PI_INIT_SYSTEM_PROMPT", () => {
     );
 
     const prompt = await buildInitOpeningUserPrompt(dir);
-    expect(prompt).toContain("站在门口");
+    expect(prompt).toContain("第一天清晨");
     expect(prompt).toContain("灯快熄了");
-    expect(prompt).toContain("声音克制");
-    expect(prompt).toContain("重大决定交还玩家");
     expect(prompt).toContain("守塔人");
     expect(prompt).toContain("穿旧雨衣");
     expect(prompt).toContain("短句，少解释");
+    expect(prompt).not.toContain("站在门口");
+    expect(prompt).not.toContain("声音克制");
+    expect(prompt).not.toContain("重大决定交还玩家");
     expect(prompt).not.toContain("原始秘密设定不应注入");
     expect(prompt).not.toContain("God State");
     expect(prompt).not.toContain("地下有会唱歌的钥匙");
@@ -179,16 +205,21 @@ describe("PI_INIT_SYSTEM_PROMPT", () => {
     expect(prompt).not.toContain("试探");
   });
 
-  it("actor 没有独立 voice 标题时只从 Current Intent 提取 voice", async () => {
+  it("opening context uses Public Scene voice instead of private Current Intent voice", async () => {
     const meta = await createStory();
     const dir = resolveWorkspaceDir(meta.storyId);
     await fs.writeFile(
+      path.join(dir, "player.md"),
+      "# 主角\n\n## Public Scene\n{\"time\":\"第一天清晨\",\"location\":\"灯塔门口\",\"narrativeVoice\":\"第一人称限知\",\"knownFacts\":[],\"visibleActors\":[{\"name\":\"守塔人\",\"appearance\":\"旧雨衣\",\"voice\":\"公开短句\"}]}",
+    );
+    await fs.writeFile(
       path.join(dir, "actors", "keeper.md"),
-      "# 守塔人\n\n## 表面形象\n穿旧雨衣。\n\n## Current Intent\n- voice: 短句，答一半。\n- hiddenIntent: 试探主角是否知道地下秘密。\n- privateMemory: 他曾在雾里失踪。",
+      "# 守塔人\n\n## 表面形象\n穿旧雨衣。\n\n## Current Intent\n- voice: 私有短句，答一半。\n- hiddenIntent: 试探主角是否知道地下秘密。\n- privateMemory: 他曾在雾里失踪。",
     );
 
     const prompt = await buildInitOpeningUserPrompt(dir);
-    expect(prompt).toContain("短句，答一半");
+    expect(prompt).toContain("公开短句");
+    expect(prompt).not.toContain("私有短句，答一半");
     expect(prompt).not.toContain("试探主角是否知道地下秘密");
     expect(prompt).not.toContain("他曾在雾里失踪");
   });
@@ -220,7 +251,7 @@ describe("buildTurnUserPrompt", () => {
     expect(prompt).toContain("我下楼吃面");
   });
 
-  it("注入顺序按变化频率升序：rules → world → actors → history → 输入 → 随机池（前缀缓存友好）", async () => {
+  it("注入顺序按变化频率升序且不提前暴露随机样本", async () => {
     const meta = await createStory();
     const dir = resolveWorkspaceDir(meta.storyId);
     await fs.writeFile(path.join(dir, "actors", "lin.md"), "# NPC：林掌柜\n");
@@ -231,7 +262,7 @@ describe("buildTurnUserPrompt", () => {
       output: "# 主角视窗\n开场白",
     });
 
-    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门", [0.5]);
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
 
     const pos = (marker: string) => prompt.indexOf(marker);
     expect(pos("=== rules.md ===")).toBeLessThan(pos("=== adjustments.md ==="));
@@ -241,7 +272,7 @@ describe("buildTurnUserPrompt", () => {
     expect(pos("=== world.md ===")).toBeLessThan(pos("=== actors/lin.md ==="));
     expect(pos("=== actors/lin.md ===")).toBeLessThan(pos("=== turns/history.jsonl"));
     expect(pos("=== turns/history.jsonl")).toBeLessThan(pos("我推门"));
-    expect(pos("我推门")).toBeLessThan(pos("=== 随机数池"));
+    expect(prompt).not.toContain("=== 随机数池");
   });
 
   it("角色卡超预算 → 注入瘦身附加指令；未超 → 无该段", async () => {
@@ -277,17 +308,84 @@ describe("buildTurnUserPrompt", () => {
     expect(prompt).not.toContain("输出3");
   });
 
-  it("随机数池注入在最末（玩家输入之后），逐号展开 6 位小数", async () => {
+  it("无账本时 prompt 保持现状，不出现账本段", async () => {
     const meta = await createStory();
     const dir = resolveWorkspaceDir(meta.storyId);
-    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门", [0.734211, 0.1]);
+    const baseline = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
+    const explicitNoLedger = await buildTurnUserPrompt(dir, meta.storyId, "我推门", undefined);
+    expect(explicitNoLedger).toBe(baseline);
+    expect(baseline).not.toContain("=== 权威薄事实账本（只读） ===");
+  });
 
-    const inputIdx = prompt.indexOf("本回合玩家输入");
-    const poolIdx = prompt.indexOf("=== 随机数池");
-    expect(poolIdx).toBeGreaterThan(inputIdx);
-    expect(prompt).toContain("R1=0.734211");
-    expect(prompt).toContain("R2=0.100000");
-    expect(prompt.indexOf("按 system 提示执行本回合")).toBeGreaterThan(poolIdx);
+  it("有账本时在历史之后、本轮输入之前注入只读事实段", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const ledger = parseFactLedger({
+      version: "1",
+      events: [
+        {
+          id: "public-e1",
+          text: "北门在第三夜上锁。",
+          source: "system",
+          time: "第三夜",
+          location: "北门",
+          witnesses: ["主角", "闻策"],
+          visibility: "public",
+          causedBy: [],
+        },
+        {
+          id: "secret-e1",
+          text: "主角独自知道北门暗格里有半张海图。",
+          source: "player",
+          time: "第三夜",
+          location: "北门暗格",
+          witnesses: ["主角"],
+          visibility: "private",
+          causedBy: [],
+        },
+        {
+          id: "derived-e1",
+          text: "闻策没有看见主角打开暗格。",
+          source: "system",
+          time: "第三夜",
+          location: "北门暗格",
+          witnesses: [],
+          visibility: "public",
+          causedBy: ["secret-e1"],
+        },
+      ],
+    });
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门", ledger);
+    const history = prompt.indexOf("=== turns/history.jsonl");
+    const fact = prompt.indexOf("=== 权威薄事实账本（只读） ===");
+    const input = prompt.indexOf("=== 本回合玩家输入（turn/input.md）===");
+    expect(history).toBeLessThan(fact);
+    expect(fact).toBeLessThan(input);
+    expect(prompt).toContain("id=public-e1");
+    expect(prompt).toContain("text=北门在第三夜上锁。");
+    expect(prompt).toContain("location=北门");
+    expect(prompt).toContain("witnesses=主角 | 闻策");
+    expect(prompt).toContain("visibility=public");
+    expect(prompt).toContain("知识边界=");
+    expect(prompt).toContain("仅以下角色掌握未公开事实：主角；");
+    expect(prompt).not.toContain("secret-e1");
+    expect(prompt).not.toContain("derived-e1");
+    expect(prompt).not.toContain("北门暗格");
+    expect(prompt).not.toContain("半张海图");
+    expect(prompt).not.toContain("闻策没有看见");
+    expect(prompt).toContain("它不替代人物动机、语气、自由叙事或玩家选择");
+    expect(prompt).toContain("不得改写账本");
+    expect(prompt).toContain("未明确给出的截止日期、名额/稀缺性、默认后果、不可逆影响均视为未知");
+    expect(prompt).toContain("玩家未明确决定的重大选择必须保持未决");
+  });
+
+  it("玩家上下文不暴露随机数或允许预选结果", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const prompt = await buildTurnUserPrompt(dir, meta.storyId, "我推门");
+    expect(prompt).not.toContain("R1=");
+    expect(prompt).not.toContain("随机数池");
+    expect(PI_TURN_SYSTEM_PROMPT).toContain("收到完整候选之后才抽样");
   });
 
   it("rollPool 缺省为空：不注入随机数池段", async () => {
@@ -315,11 +413,11 @@ describe("buildTurnUserPrompt", () => {
 });
 
 describe("pi-config", () => {
-  it("拒绝 qwen-fp8 之外的模型配置", () => {
+  it("拒绝 deepseek-v4.1-flash 之外的模型配置", () => {
     const saved = process.env.ANTHROPIC_MODEL;
     process.env.ANTHROPIC_MODEL = "another-model";
     try {
-      expect(() => resolvePiModel()).toThrow(/requires qwen-fp8/);
+      expect(() => resolvePiModel()).toThrow(/requires deepseek-v4\.1-flash/);
     } finally {
       if (saved === undefined) delete process.env.ANTHROPIC_MODEL;
       else process.env.ANTHROPIC_MODEL = saved;
@@ -342,8 +440,16 @@ describe("pi-config", () => {
       const parsed = JSON.parse(json);
       expect(parsed.providers.newapi.baseUrl).toBe("http://gw.test:3030/v1");
       expect(parsed.providers.newapi.api).toBe("openai-completions");
-      expect(parsed.providers.newapi.models[0].id).toBe("qwen-fp8");
+      expect(parsed.providers.newapi.models[0].id).toBe("deepseek-v4.1-flash");
       expect(parsed.providers.newapi.models[0].reasoning).toBe(false);
+      const response = parsed.providers["newapi-response"];
+      expect(response.baseUrl).toBe(parsed.providers.newapi.baseUrl);
+      expect(response.apiKey).toBe(parsed.providers.newapi.apiKey);
+      expect(response.models[0]).toMatchObject({
+        id: "deepseek-v4.1-flash", reasoning: true,
+        compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
+      });
+      expect(parsed.providers.newapi.models[0].compat.thinkingFormat).toBe("deepseek");
 
       const file = await ensurePiConfig();
       expect(file).toBe(path.join(resolvePiAgentDir(), "models.json"));

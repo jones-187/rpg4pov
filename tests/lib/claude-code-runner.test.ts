@@ -25,9 +25,9 @@ function makeMockSpawn(result: SpawnResult): { spawn: SpawnFn; calls: CallRecord
 }
 
 describe("ClaudeCodeRunner", () => {
-  it("显式把 Claude CLI 模型硬锁为 qwen-fp8", async () => {
+  it("显式把 Claude CLI 模型硬锁为 deepseek-v4.1-flash", async () => {
     const saved = process.env.ANTHROPIC_MODEL;
-    process.env.ANTHROPIC_MODEL = "qwen-fp8";
+    process.env.ANTHROPIC_MODEL = "deepseek-v4.1-flash";
     try {
       const meta = await createStory();
       const { spawn, calls } = makeMockSpawn({ code: 0, stdout: "", stderr: "" });
@@ -39,8 +39,8 @@ describe("ClaudeCodeRunner", () => {
         signal: AbortSignal.timeout(5000),
       });
       const modelIndex = calls[0].args.indexOf("--model");
-      expect(calls[0].args[modelIndex + 1]).toBe("qwen-fp8");
-      expect(calls[0].opts.env?.ANTHROPIC_MODEL).toBe("qwen-fp8");
+      expect(calls[0].args[modelIndex + 1]).toBe("deepseek-v4.1-flash");
+      expect(calls[0].opts.env?.ANTHROPIC_MODEL).toBe("deepseek-v4.1-flash");
     } finally {
       if (saved === undefined) delete process.env.ANTHROPIC_MODEL;
       else process.env.ANTHROPIC_MODEL = saved;
@@ -61,7 +61,7 @@ describe("ClaudeCodeRunner", () => {
           playerInput: "测试",
           signal: AbortSignal.timeout(5000),
         }),
-      ).rejects.toThrow(/requires qwen-fp8/);
+      ).rejects.toThrow(/requires deepseek-v4\.1-flash/);
       expect(calls).toHaveLength(0);
     } finally {
       if (saved === undefined) delete process.env.ANTHROPIC_MODEL;

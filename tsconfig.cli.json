@@ -16,6 +16,8 @@
     "src/lib/claude-code-runner.ts",
     "src/lib/claude-settings.ts",
     "src/lib/claude-prompt.ts",
+    "src/lib/pi-runner.ts",
+    "src/lib/turn-orchestrator.ts",
     "src/lib/turn-history.ts",
     "src/lib/agent-runner.ts",
     "src/lib/diagnostics.ts"

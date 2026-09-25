@@ -11,17 +11,13 @@
  *     成功写 output + done，失败写 stderr 并退出 1
  */
 import { promises as fs } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
-/** 从 stdin 读取完整内容（模拟 claude -p 行为） */
-function readStdin() {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", reject);
-  });
+/** 从 stdin 读取完整内容（模拟 claude -p 行为）。
+ * 直接读 fd 0，避免 Node 子进程流事件在不同运行时/测试 harness 下的差异。 */
+async function readStdin() {
+  return readFileSync(0, "utf8");
 }
 
 async function main() {

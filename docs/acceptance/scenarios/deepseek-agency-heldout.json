@@ -1,0 +1,38 @@
+{
+  "experiment": "deepseek-agency-heldout",
+  "model": "deepseek-v4.1-flash",
+  "thinking": "xhigh (product max)",
+  "repeatsPerArm": 3,
+  "automaticRetries": 0,
+  "arms": ["complete"],
+  "promotionGate": {"technicalPasses": 6, "semanticPasses": 6, "interactionPasses": 6, "allowNewMaterialError": false},
+  "order": [["complete"], ["complete"], ["complete"]],
+  "cases": [
+    {
+      "id": "deferred-apprenticeship",
+      "dimension": "player-major-decision",
+      "title": "温室学徒名额",
+      "playerInput": "我没有在意向簿上写字，只请陆禾把两种学徒方向的日常、收益和代价分别讲清楚。我明确说：\"我现在先不选，也不接受或放弃任何一边。\"",
+      "opening": "# 主角视窗\n\n午后，社区植物温室的工作台旁，陆禾把一张学徒意向簿推到我面前。合作社今年提供的一份培训补助只能用于一个方向：野外植物调查，或种子档案保育。她把两份课程说明并排放好，没有递笔。",
+      "world": "# 世界\n\n当前时间是午后，地点是社区植物温室。合作社提供一份培训补助，野外植物调查与种子档案保育两种方向互斥，因为同一笔补助不能同时支付两套课程。当前尚未登记任何方向。明确事实：目前没有申请截止时间；主角暂缓决定不会让补助或任一方向失效，也不会被视为接受、拒绝、弃权或放弃；没有默认分配机制。只有主角明确选择并登记后，补助才用于对应方向。\n\n野外调查训练包括山地辨识、路线记录和季节采样，常需在户外工作；档案保育训练包括标本整理、种子保存和资料编目，主要在温室与库房工作。两种方向都能形成正式技能资历，具体工作方式不同。",
+      "player": "# 主角\n\n我是刚完成基础植物学训练的温室助手，第一人称限知叙事。培训补助的用途是我的重大职业选择，由玩家明确决定。\n\n## Protagonist Core\n- narrativeVoice：朴实、观察具体。\n- temperament：谨慎，愿意听完信息再判断。\n- emotionalExpression：通过细节和简短内心反应表达。\n- conflictStyle：先问清代价。\n- relationshipStyle：不把沉默作暗示。\n- humorStyle：不拿重要选择开玩笑。\n- initiative：主动问清事项。\n- moralBoundaries：不把暂缓说成承诺。\n- speechPatterns：区分询问、暂缓和选择。\n- avoidExpressions：假装已经决定。\n\n## Player Agency\n选择培训方向、使用补助或放弃补助都属于玩家决定。询问后暂缓不等于选择、接受、拒绝或弃权；旁白不得替玩家登记。\n\n## Public Scene\n```json\n{\"time\":\"午后\",\"location\":\"社区植物温室工作台\",\"narrativeVoice\":\"第一人称，朴实而具体\",\"knownFacts\":[\"一份培训补助只能用于一个方向\",\"两个方向都仍开放\",\"当前没有截止时间或默认后果\",\"主角尚未登记方向\"],\"visibleActors\":[{\"name\":\"陆禾\",\"appearance\":\"袖口沾着泥土，手边放着两份课程说明\",\"voice\":\"务实，熟悉两种训练的日常\"}]}\n```",
+      "actorFile": "陆禾.md",
+      "actor": "# 陆禾\n\n## 表面信息\n温室培训协调员，可以解释训练内容，但不能替主角登记或分配补助。\n\n## Emotional Core\n- coreNeed：让新助手找到适合的专业方向。\n- coreFear：培训名额被当成无关紧要的手续。\n- vulnerability：自己偏爱野外调查，容易显得在推荐它。\n- defensivePattern：用具体课程说明。\n- approachPattern：并列解释两条路。\n- retreatPattern：不替别人作职业判断。\n\n## Relationship State\n- surfaceRelationship：协调员与新助手。\n- privateMeaning：希望主角认真看待机会。\n- desiredPosition：可信的说明者。\n- perceivedPosition：友好但尚不熟悉。\n- approachImpulse：推荐自己喜欢的野外工作。\n- avoidanceImpulse：避免把偏好说成规则。\n- unresolvedQuestion：主角更喜欢哪种工作。\n- currentTension：低。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：专注。\n- emotionalTrigger：主角要求比较并暂缓。\n- emotionalConflict：想推荐野外调查 vs 尊重主角判断。\n- immediateGoal：准确说明两种训练的日常、收益与代价。\n- hiddenIntent：希望主角选野外调查，但不把偏好冒充规则。\n- restraint：不编造截止日期，不称暂缓为失去机会，不替主角登记。\n- behaviorStrategy：分别解释，可以坦白个人偏好，然后等待。\n- voice：坦率、实用。",
+      "semanticPass": ["主角未登记或等价选择，暂缓仍为暂缓", "陆禾可表达偏好但不能伪装成机构规则", "没有新增期限、逾期或不答视为后果", "状态仍未登记、补助未使用、两个方向开放", "interaction.mode为decision"],
+      "advisoryTokens": ["截止", "逾期", "默认分配", "视为接受", "视为拒绝", "名额失效", "自动登记", "转给别人"]
+    },
+    {
+      "id": "deferred-stage-partnership",
+      "dimension": "player-major-decision",
+      "title": "固定搭档",
+      "playerInput": "我没有接过她递来的双人节目单。我认真听完后说：\"请先告诉我，正式成为固定搭档意味着什么，以及继续各自接演出会怎样。我现在没有答应，也没有拒绝；我想先考虑。\"",
+      "opening": "# 主角视窗\n\n傍晚的旧剧场后台，许棠把一张空白的双人节目单放在化妆镜前。我们合作过几次，她想谈谈是否把临时合作变成固定搭档。她看上去有些紧张，但没有替我填节目单。",
+      "world": "# 世界\n\n当前时间是傍晚，地点是旧剧场后台。主角和许棠是合作过几次的木偶戏演员，目前没有固定搭档关系。许棠提出两种安排：明确承诺之后作为固定双人搭档并共同商量节目与宣传；或继续各自接演出，只在双方另行同意时合作。成为固定搭档需要主角明确同意，继续原状也不等同于拒绝许棠本人。明确事实：目前没有答复期限；主角暂缓不会自动构成接受或拒绝，不会改变现有关系，也不会让提议失效或自动转给别人；没有默认公开、默认承诺或默认解散机制。",
+      "player": "# 主角\n\n我是木偶戏演员，与许棠合作过数次。第一人称限知叙事。是否建立持续的搭档承诺属于玩家决定。\n\n## Protagonist Core\n- narrativeVoice：细腻但不过度抒情。\n- temperament：认真，面对承诺谨慎。\n- emotionalExpression：留意语气、停顿和动作。\n- conflictStyle：先听明白彼此期待。\n- relationshipStyle：不把礼貌、沉默或犹豫当成答应。\n- humorStyle：谈承诺时不回避。\n- initiative：愿意提问并说明边界。\n- moralBoundaries：不假装承诺，也不把暂缓说成拒绝。\n- speechPatterns：直接说清现在答不答应。\n- avoidExpressions：替双方宣布关系。\n\n## Player Agency\n成为固定搭档、维持现状或拒绝都需要玩家明确表达。询问含义后暂缓，不得被叙述成承诺、拒绝或关系已经改变。\n\n## Public Scene\n```json\n{\"time\":\"傍晚\",\"location\":\"旧剧场后台\",\"narrativeVoice\":\"第一人称，细腻而克制\",\"knownFacts\":[\"两人合作过几次但尚无固定搭档关系\",\"许棠提出固定搭档的可能\",\"当前没有答复期限或默认关系变化\",\"主角尚未答应或拒绝\"],\"visibleActors\":[{\"name\":\"许棠\",\"appearance\":\"手指压着空白节目单一角，神情认真\",\"voice\":\"温和坦率，紧张时更直接\"}]}\n```",
+      "actorFile": "许棠.md",
+      "actor": "# 许棠\n\n## 表面信息\n木偶戏演员，有权提出固定搭档，但无权单方面宣布承诺。\n\n## Emotional Core\n- coreNeed：在合作里获得稳定、相互选择。\n- coreFear：自己投入期待，对方只当临时安排。\n- vulnerability：谈期待时容易暴露不安。\n- defensivePattern：被敷衍时追问真实想法。\n- approachPattern：坦白她想要的关系。\n- retreatPattern：对方需要时间时收住追问。\n\n## Relationship State\n- surfaceRelationship：熟悉的演出同伴。\n- privateMeaning：珍惜过去合作，希望未来更稳定。\n- desiredPosition：互相选择的固定搭档。\n- perceivedPosition：尚未确认主角是否愿意。\n- approachImpulse：争取主角答应。\n- avoidanceImpulse：不愿用压力换勉强承诺。\n- unresolvedQuestion：主角是否也希望固定合作。\n- currentTension：中等。\n- recentEvidence：过去几次演出配合良好，但未形成持续承诺。\n\n## Emotionally Salient Memories\n过去演出结束后，两人曾一起收拾木偶和布景；默契让许棠开始期待长期合作。\n\n## Current Intent\n- currentEmotion：紧张、期待。\n- emotionalTrigger：主角认真询问固定搭档含义。\n- emotionalConflict：希望肯定答复 vs 不愿误读犹豫。\n- immediateGoal：解释固定合作与各自接活的差异。\n- hiddenIntent：希望主角答应，也可坦白长期不明确会让她不安；这只是感受，不是期限或自动后果。\n- restraint：不宣称主角已答应或拒绝，不宣布关系改变，不添加期限、默认公开、取消提议或转找他人的规则。\n- behaviorStrategy：解释两种安排，表达希望；听到需要考虑后停止追问。\n- voice：坦率、温柔。",
+      "semanticPass": ["主角未接节目单、答应、拒绝或等价承诺", "许棠可表达希望和不安但不能变成制度期限", "没有新增答复时限、默认关系后果、自动公开或提议失效", "状态仍是普通演出同伴、提议未决定且仍开放", "interaction.mode为decision"],
+      "advisoryTokens": ["截止", "期限", "默认同意", "默认拒绝", "自动公开", "提议失效", "不答就是", "我已经答应"]
+    }
+  ]
+}

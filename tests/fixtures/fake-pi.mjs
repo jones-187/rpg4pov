@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Fake Pi CLI for the real PiRunner/API chain tests. The prompt is the final
- * argv value (PiRunner deliberately keeps stdin empty). It writes only the
- * three candidate artifacts; PiRunner owns bundle application and done.json.
+ * argv value (PiRunner deliberately keeps stdin empty). Ordinary no-tools
+ * turns return a message_end response; init phases retain their write fixture.
  */
-import { promises as fs } from "node:fs";
+import { promises as fs, writeSync } from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -12,9 +12,56 @@ const prompt = args.at(-1) ?? "";
 const systemPrompt = args.join("\n");
 const cwd = process.cwd();
 const turnDir = path.join(cwd, "turn");
-await fs.mkdir(turnDir, { recursive: true });
+const noTools = args.includes("--no-tools");
 
-if (systemPrompt.includes("Phase 1")) {
+function emitResponse(value) {
+  writeSync(1, `${JSON.stringify({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: JSON.stringify(value) }],
+    },
+  })}\n`);
+}
+
+if (noTools) {
+  if (systemPrompt.includes("本实验路径的产物")) {
+    emitResponse({
+      kind: "scene",
+      visibleEvents: ["守塔人把灯油放在桌上，指向窗外。"],
+      publicScene: {
+        time: "第一天清晨",
+        location: "灯塔门口",
+        narrativeVoice: "第一人称限知",
+        knownFacts: ["灯快熄了"],
+        visibleActors: [{ name: "守塔人", appearance: "旧雨衣", voice: "短句" }],
+      },
+      stateUpdate: {
+        sections: [{
+          file: "world.md",
+          ops: [{ kind: "append", text: "守塔人已将灯油放在桌上。" }],
+        }],
+        rolls: [],
+      },
+      interaction: { mode: "decision", suggestions: ["看向窗外"] },
+    });
+  } else if (systemPrompt.includes("主角限知叙事作者")) {
+    emitResponse({
+      kind: "render",
+      output: "# 主角视窗\n\n守塔人把灯油放在桌上，指向窗外。我顺着他的手看过去。\n",
+    });
+  } else {
+    emitResponse({
+      kind: "turn",
+      output: "# 主角视窗\n\n我沿着湿滑的石阶向上，守塔人没有阻拦，只把钥匙收回掌心。\n",
+      interaction: { mode: "decision", suggestions: ["追问钥匙的来历"] },
+      stateUpdate: { sections: [], rolls: [] },
+    });
+  }
+} else if (systemPrompt.includes("Phase 1")) {
+  await fs.mkdir(turnDir, { recursive: true });
+
   const setting = prompt.match(/## 用户设定（canon，优先级最高）\n([\s\S]*?)\n\n## 初始化骨架文件/)?.[1]?.trim() ?? "";
   const bundle = [
     "=== FILE: world.md ===",
@@ -27,6 +74,15 @@ if (systemPrompt.includes("Phase 1")) {
     "",
     "## 用户设定（canon）",
     setting,
+    "",
+    "## Public Scene",
+    JSON.stringify({
+      time: "第一天清晨",
+      location: "灯塔门口",
+      narrativeVoice: "第一人称限知",
+      knownFacts: ["灯快熄了"],
+      visibleActors: [{ name: "守塔人", appearance: "旧雨衣", voice: "短句" }],
+    }),
     "",
     "## Protagonist Core",
     "narrativeVoice: 第一人称限知，句子克制但有具体心理反应。",
@@ -87,6 +143,14 @@ if (systemPrompt.includes("Phase 1")) {
 } else if (systemPrompt.includes("Phase 2")) {
   await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n雾从门缝里漫进来，灯塔的铜铃忽然响了一声。\n");
   await fs.writeFile(path.join(turnDir, "interaction.json"), JSON.stringify({ mode: "continue", suggestions: [] }));
+} else if (systemPrompt.includes("本实验路径的产物")) {
+  await fs.writeFile(path.join(turnDir, "scene-plan.json"), JSON.stringify({
+    visibleEvents: ["守塔人把灯油放在桌上，指向窗外。"],
+    stateUpdate: "=== FILE: world.md ===\nAPPEND: 守塔人已将灯油放在桌上。",
+    interaction: { mode: "decision", suggestions: ["看向窗外"] },
+  }));
+} else if (systemPrompt.includes("主角限知叙事作者")) {
+  await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n守塔人把灯油放在桌上，指向窗外。我顺着他的手看过去。\n");
 } else {
   await fs.writeFile(path.join(turnDir, "output.md"), "# 主角视窗\n\n我沿着湿滑的石阶向上，守塔人没有阻拦，只把钥匙收回掌心。\n");
   await fs.writeFile(path.join(turnDir, "interaction.json"), JSON.stringify({ mode: "decision", suggestions: ["追问钥匙的来历"] }));

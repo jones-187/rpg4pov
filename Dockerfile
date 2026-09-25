@@ -50,6 +50,7 @@ ENV WORKSPACE_ROOT=/app/data/workspaces
 ENV USE_BUILTIN_RIPGREP=0
 ENV SHELL=/bin/bash
 ENV PI_WRITE_BOUNDARY_EXTENSION_PATH=/app/pi-extensions/write-boundary.ts
+ENV PI_RESPONSE_EXTENSION_PATH=/app/pi-extensions/json-response.ts
 
 # alpine musl 适配：装 ripgrep（claude bundled ripgrep 是 glibc 编译）+ bash
 RUN apk add --no-cache ripgrep bash

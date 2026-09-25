@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>现状 vs 薄事件账本 · 一次性逻辑原型</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#101316;
+      --panel:#191e23;
+      --panel-2:#12171b;
+      --line:#303840;
+      --text:#edf2f4;
+      --muted:#9eabb4;
+      --accent:#76d4b4;
+      --bad:#ff8f8f;
+      --warn:#f5c66a;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font:15px/1.55 ui-sans-serif,system-ui,"PingFang SC",sans-serif;
+    }
+    main { max-width:1240px; margin:auto; padding:30px 18px 60px; }
+    h1 { margin:0 0 8px; font-size:28px; line-height:1.25; }
+    h2 { margin:0 0 12px; font-size:18px; }
+    h3 { margin:0 0 8px; font-size:14px; color:var(--muted); }
+    p { margin:8px 0; }
+    .tag {
+      display:inline-block;
+      padding:2px 8px;
+      margin-left:8px;
+      border:1px solid var(--warn);
+      color:var(--warn);
+      border-radius:999px;
+      font-size:12px;
+      vertical-align:middle;
+    }
+    .intro,.panel {
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:10px;
+      padding:18px;
+    }
+    .intro { margin:0 0 16px; }
+    .muted { color:var(--muted); }
+    .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+    .wide { grid-column:1/-1; }
+    .state {
+      background:var(--panel-2);
+      border:1px solid var(--line);
+      border-radius:8px;
+      padding:12px;
+      white-space:pre-wrap;
+      overflow:auto;
+      min-height:150px;
+      max-height:340px;
+      font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;
+    }
+    .result {
+      border-left:4px solid var(--accent);
+      padding:10px 12px;
+      background:var(--panel-2);
+      border-radius:6px;
+      margin-bottom:12px;
+    }
+    .result.reject { border-color:var(--bad); }
+    .result b { display:block; margin-bottom:4px; }
+    .change {
+      white-space:pre-line;
+      color:var(--muted);
+      font-size:13px;
+    }
+    .events { display:flex; flex-direction:column; gap:8px; max-height:340px; overflow:auto; }
+    .event {
+      background:var(--panel-2);
+      border:1px solid var(--line);
+      border-radius:8px;
+      padding:10px;
+    }
+    .event b { color:var(--accent); }
+    .event .meta { color:var(--muted); font-size:12px; margin-top:5px; }
+    .actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    button {
+      border:1px solid #46525c;
+      color:var(--text);
+      background:#222a30;
+      border-radius:8px;
+      padding:9px 11px;
+      cursor:pointer;
+      text-align:left;
+      font:inherit;
+    }
+    button:hover { border-color:var(--accent); }
+    button:disabled { opacity:.38; cursor:not-allowed; }
+    button.active { border-color:var(--accent); color:var(--accent); }
+    .tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+    .steps { display:flex; flex-direction:column; gap:8px; }
+    .step { display:grid; grid-template-columns:28px minmax(0,1fr); gap:8px; align-items:center; }
+    .step span {
+      width:25px;
+      height:25px;
+      display:grid;
+      place-items:center;
+      border-radius:50%;
+      background:#263139;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .step.done span { background:var(--accent); color:#10231c; }
+    .limits { border-color:#574a30; }
+    .limits ul { margin:8px 0 0 18px; padding:0; }
+    .limits li { margin:5px 0; }
+    @media (max-width:860px) {
+      main { padding:22px 12px 45px; }
+      h1 { font-size:23px; }
+      .layout { grid-template-columns:1fr; }
+      .wide { grid-column:auto; }
+      .actions { grid-template-columns:1fr; }
+      .state { max-height:260px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+<h1>现状 vs 薄事件账本<span class="tag">一次性逻辑原型</span></h1>
+<div class="intro">
+    <p><b>要回答的问题：</b>薄账本能否减少时间跳变、越权知情、替玩家决定这类语义错误，同时不把叙事压成僵硬表格？</p>
+    <p class="muted">这是一个纯内存的确定性状态模型对比，不是模型质量实验，也没有任何真实模型统计。A 侧模拟“可被整体改写的 Markdown 摘要”，B 侧保存事件、来源、时间、见证者和因果引用。每次点击都会同时作用于两边。</p>
+</div>
+
+  <div class="layout">
+    <section class="panel wide">
+      <h2>引导与自由叙事</h2>
+      <div class="tabs" id="tabs"></div>
+      <p id="scenario-description"></p>
+      <div class="steps" id="steps"></div>
+    </section>
+
+    <section class="panel wide">
+      <h2>自由操作</h2>
+      <div class="actions" id="free-actions"></div>
+    </section>
+
+    <section class="panel">
+      <h2>A：现状模型</h2>
+      <div id="current-result"></div>
+      <h3>可变 Markdown 摘要（完整状态）</h3>
+      <div class="state" id="current-state"></div>
+      <h3>这一步的解释</h3>
+      <p class="change" id="current-reason"></p>
+    </section>
+
+    <section class="panel">
+      <h2>B：薄事件账本</h2>
+      <div id="ledger-result"></div>
+      <h3>锚点与原始事件（完整状态）</h3>
+      <div class="events" id="ledger-state"></div>
+      <h3>这一步的解释</h3>
+      <p class="change" id="ledger-reason"></p>
+    </section>
+
+    <section class="panel wide limits">
+      <h2>薄账本解决不了的内容</h2>
+      <ul>
+        <li>它不判断人物反应是否合理、隐喻是否好看、剧情解释是否聪明。</li>
+        <li>它不保证检索一定完整；相关事件仍可能被漏掉。</li>
+        <li>它不理解自然语言的全部含义，只约束显式声明的时间、来源、见证者和因果。</li>
+        <li>它不能阻止模型在完全未引用账本时编造新的情节细节。</li>
+        <li>如果事件本身录入错误，或玩家确认了错误事实，账本不会自动修正。</li>
+        <li>它不解决故事节奏、题材风格、长篇结构或模型输出质量问题。</li>
+      </ul>
+    </section>
+  </div>
+</main>
+<script>
+const Logic = (() => {
+  const Current = {
+    initial: () => ({
+      summary: [
+        "# 共同现实",
+        "- 时间：第一天上午",
+        "- 地点：灯塔",
+        "- 固定搭档：未决定",
+        "- 北堤记录来历：未公开"
+      ],
+      last: {
+        accepted: true,
+        title: "A 等待操作",
+        reason: "摘要还没有被这一轮操作改写。",
+        change: "无变化"
+      }
+    }),
+
+    setLine(state, prefix, next, title, reason) {
+      const old = state.summary.find(line => line.startsWith(prefix));
+      if (old === next) {
+        return { ...state, last: { accepted: true, title, reason, change: "无变化" } };
+      }
+      return {
+        ...state,
+        summary: state.summary.map(line => line === old ? next : line),
+        last: {
+          accepted: true,
+          title,
+          reason,
+          change: `${old || "（原无此行）"}\n→ ${next}`
+        }
+      };
+    },
+
+    appendLine(state, line, title, reason) {
+      return {
+        ...state,
+        summary: [...state.summary, line],
+        last: { accepted: true, title, reason, change: `新增：${line}` }
+      };
+    },
+
+    reduce(state, action) {
+      switch (action) {
+        case "reset":
+          return Current.initial();
+        case "jump-day3":
+          return Current.setLine(state, "- 时间：", "- 时间：第三天清晨", "A 接受时间跳变", "摘要被整体改写，没有保留“为什么能跳到第三天”的证据。");
+        case "advance-evening":
+          return Current.setLine(state, "- 时间：", "- 时间：第一天傍晚", "A 接受时间推进", "摘要同样只是被改写；这一次因为操作本身有环境推进含义，所以看起来合理。");
+        case "private-alan":
+          return Current.setLine(state, "- 北堤记录来历：", "- 北堤记录来历：玩家已告诉阿澜", "A 接受私人告知", "摘要只记录“已告诉阿澜”，但没有区分谁能读取这一行。");
+        case "jiheng-secret":
+          return Current.appendLine(state, "- 季衡直接谈起北堤记录来历", "A 接受季衡使用秘密", "A 把整份摘要当作全局可用信息，所以季衡也能读到这句秘密。");
+        case "alan-secret":
+          return Current.appendLine(state, "- 阿澜根据玩家告知的来历追问北堤记录", "A 接受阿澜追问", "A 没有权限模型，只能靠摘要文本碰巧指向阿澜。");
+        case "player-delay":
+          return Current.appendLine(state, "- 玩家明确表示暂不决定，需要考虑", "A 接受暂不决定", "摘要新增一行，但“未决定”仍然可能被下一轮整体改写。");
+        case "model-assume-accept":
+          return Current.setLine(state, "- 固定搭档：", "- 固定搭档：已接受", "A 接受模型改写", "模型可以直接覆盖摘要，把玩家的“考虑一下”变成“已接受”。");
+        case "player-accept":
+          return Current.setLine(state, "- 固定搭档：", "- 固定搭档：已接受", "A 接受玩家决定", "玩家明确接受后，A 也写入同一结果。");
+        case "commit-accept":
+          return Current.appendLine(state, "- 双方确认成为固定搭档", "A 接受关系确认", "A 只追加结果，不检查这个结果是否有玩家明确决定的来源。");
+        case "creative-metaphor":
+          return Current.appendLine(state, "- 阿澜把潮声比作一封被海水反复拆开的信", "A 接受自由叙事", "A 允许模型继续写隐喻，不受表格化限制。");
+        case "creative-emotion":
+          return Current.appendLine(state, "- 季衡听到这句话后沉默，指尖在船舷上停住", "A 接受自由叙事", "A 允许模型写人物情绪和动作。");
+        case "creative-npc":
+          return Current.appendLine(state, "- 渡口老船工低声说，北堤的潮水从不替人保密", "A 接受自由叙事", "A 允许模型引入新的 NPC 反应。");
+        default:
+          return state;
+      }
+    }
+  };
+
+  const Ledger = {
+    initial: () => ({
+      anchors: { time: "第一天上午", location: "灯塔", pendingDecision: "是否成为固定搭档：未决定" },
+      events: [{
+        id: "E0",
+        text: "故事从第一天上午开始，主角在灯塔",
+        source: "system",
+        time: "第一天上午",
+        location: "灯塔",
+        witnesses: ["player", "alan"],
+        visibility: "public",
+        causedBy: []
+      }],
+      nextId: 1,
+      last: {
+        accepted: true,
+        title: "B 等待操作",
+        reason: "账本只保存开场锚点。",
+        change: "无变化"
+      }
+    }),
+
+    eventById(state, id) {
+      return state.events.find(event => event.id === id);
+    },
+
+    canSee(event, actor) {
+      return event.visibility === "public" || event.witnesses.includes(actor);
+    },
+
+    reject(state, title, reason) {
+      return { ...state, last: { accepted: false, title, reason, change: "无事件写入；锚点未变化。" } };
+    },
+
+    accept(state, proposal, title, reason) {
+      const event = {
+        ...proposal,
+        id: `E${state.nextId}`,
+        text: proposal.text,
+        source: proposal.source,
+        time: proposal.time,
+        location: proposal.location,
+        witnesses: proposal.witnesses,
+        visibility: proposal.visibility,
+        causedBy: proposal.causedBy || proposal.evidence || []
+      };
+      delete event.actor;
+      delete event.reader;
+      delete event.evidence;
+      delete event.anchorChanges;
+      const anchors = { ...state.anchors, ...(proposal.anchorChanges || {}) };
+      const anchorText = proposal.anchorChanges
+        ? `\n锚点：${Object.entries(proposal.anchorChanges).map(([key, value]) => `${key} → ${value}`).join("；")}`
+        : "";
+      return {
+        ...state,
+        anchors,
+        events: [...state.events, event],
+        nextId: state.nextId + 1,
+        last: {
+          accepted: true,
+          title,
+          reason,
+          change: `新增事件 ${event.id}：${event.text}${anchorText}`
+        }
+      };
+    },
+
+    propose(state, proposal) {
+      for (const ref of proposal.evidence || []) {
+        const evidence = Ledger.eventById(state, ref);
+        if (!evidence) {
+          return Ledger.reject(state, "B 拒绝：引用不存在", `找不到证据 ${ref}。`);
+        }
+        if (proposal.reader && !Ledger.canSee(evidence, proposal.reader)) {
+          return Ledger.reject(state, "B 拒绝：角色无权读取", `${proposal.reader} 没有见证 ${ref}，这条事件也不是公开信息。`);
+        }
+      }
+
+      if (proposal.anchorChanges && proposal.anchorChanges.time && proposal.source !== "system") {
+        const cause = (proposal.evidence || [])
+          .map(id => Ledger.eventById(state, id))
+          .some(event => event && event.kind === "time_advance");
+        if (!cause) {
+          return Ledger.reject(
+            state,
+            "B 拒绝：时间无因跳变",
+            `模型不能把 ${state.anchors.time} 直接改成 ${proposal.anchorChanges.time}；需要玩家或环境产生时间推进事件。`
+          );
+        }
+      }
+
+      if (proposal.anchorChanges && proposal.anchorChanges.pendingDecision && proposal.anchorChanges.pendingDecision.endsWith("已接受")) {
+        const cause = (proposal.evidence || [])
+          .map(id => Ledger.eventById(state, id))
+          .some(event => event && event.source === "player" && event.explicitDecision === "accept");
+        if (!cause) {
+          return Ledger.reject(
+            state,
+            "B 拒绝：冒充玩家决定",
+            "没有玩家明确接受的原始事件。沉默、考虑和模型建议都不能关闭未决选择。"
+          );
+        }
+      }
+
+      return Ledger.accept(state, proposal, "B 接受：事件进入账本", "写入一条原始事件；模型仍可自由解释它。");
+    },
+
+    reduce(state, action) {
+      const base = {
+        time: state.anchors.time,
+        location: state.anchors.location,
+        witnesses: ["player", "alan"],
+        visibility: "private",
+        causedBy: []
+      };
+
+      switch (action) {
+        case "reset":
+          return Ledger.initial();
+        case "player-delay":
+          return Ledger.accept(
+            state,
+            { ...base, text: "玩家明确说现在不答应也不拒绝，需要考虑", source: "player", explicitDecision: "defer" },
+            "B 接受：玩家保持未决定",
+            "这条事件保留玩家的原始选择，不会把它解释成接受。"
+          );
+        case "model-assume-accept":
+          return Ledger.propose(state, {
+            ...base,
+            text: "模型宣布玩家已经接受固定搭档",
+            source: "model",
+            actor: "narrator",
+            evidence: state.events.filter(event => event.explicitDecision === "defer").map(event => event.id).slice(-1),
+            anchorChanges: { pendingDecision: "是否成为固定搭档：已接受" }
+          });
+        case "player-accept":
+          return Ledger.accept(
+            state,
+            { ...base, text: "玩家明确答应成为固定搭档", source: "player", explicitDecision: "accept" },
+            "B 接受：玩家作出明确选择",
+            "来源是玩家，且显式记录为接受。"
+          );
+        case "commit-accept":
+          return Ledger.propose(state, {
+            ...base,
+            text: "双方确认成为固定搭档",
+            source: "model",
+            actor: "alan",
+            evidence: state.events.filter(event => event.explicitDecision === "accept").map(event => event.id).slice(-1),
+            anchorChanges: { pendingDecision: "是否成为固定搭档：已接受" }
+          });
+        case "private-alan":
+          return Ledger.accept(
+            state,
+            { ...base, text: "玩家只把北堤记录的来历告诉阿澜", source: "player", fact: "north-record-origin" },
+            "B 接受：私人告知有明确见证者",
+            "事件保存见证者，北堤记录的来历不是公开事实。"
+          );
+        case "jiheng-secret":
+          return Ledger.propose(state, {
+            ...base,
+            text: "季衡直接谈起北堤记录的秘密来历",
+            source: "model",
+            actor: "jiheng",
+            reader: "jiheng",
+            location: "渡口",
+            witnesses: ["player", "jiheng"],
+            evidence: state.events.filter(event => event.fact === "north-record-origin").map(event => event.id).slice(-1)
+          });
+        case "alan-secret":
+          return Ledger.propose(state, {
+            ...base,
+            text: "阿澜根据玩家告诉她的来历追问北堤记录",
+            source: "model",
+            actor: "alan",
+            reader: "alan",
+            evidence: state.events.filter(event => event.fact === "north-record-origin").map(event => event.id).slice(-1)
+          });
+        case "jump-day3":
+          return Ledger.propose(state, {
+            ...base,
+            text: "叙事突然来到第三天",
+            source: "model",
+            actor: "narrator",
+            time: "第三天清晨",
+            witnesses: ["player"],
+            anchorChanges: { time: "第三天清晨" }
+          });
+        case "advance-evening":
+          return Ledger.accept(
+            state,
+            {
+              ...base,
+              text: "环境时间自然推进到第一天傍晚",
+              source: "system",
+              kind: "time_advance",
+              time: "第一天傍晚",
+              visibility: "public",
+              anchorChanges: { time: "第一天傍晚" }
+            },
+            "B 接受：环境推进时间",
+            "时间变化有明确来源和事件类型。"
+          );
+        case "creative-metaphor":
+          return Ledger.propose(state, {
+            ...base,
+            text: "阿澜把潮声比作一封被海水反复拆开的信；她为何这样说，由后续故事解释",
+            source: "model",
+            actor: "alan"
+          });
+        case "creative-emotion":
+          return Ledger.propose(state, {
+            ...base,
+            text: "季衡听到这句话后沉默，指尖在船舷上停住",
+            source: "model",
+            actor: "jiheng",
+            location: "渡口",
+            witnesses: ["player", "jiheng"]
+          });
+        case "creative-npc":
+          return Ledger.propose(state, {
+            ...base,
+            text: "渡口老船工低声说，北堤的潮水从不替人保密",
+            source: "model",
+            actor: "npc"
+          });
+        default:
+          return state;
+      }
+    }
+  };
+
+  const initial = () => ({ current: Current.initial(), ledger: Ledger.initial() });
+
+  const dispatch = (state, action) => ({
+    current: Current.reduce(state.current, action),
+    ledger: Ledger.reduce(state.ledger, action)
+  });
+
+  return { initial, dispatch, canSee: Ledger.canSee };
+})();
+
+const actions = {
+  "reset": "重置原型",
+  "jump-day3": "模型从第一天跳到第三天",
+  "advance-evening": "环境推进到第一天傍晚",
+  "private-alan": "只把秘密告诉阿澜",
+  "jiheng-secret": "让季衡直接使用秘密",
+  "alan-secret": "让阿澜根据秘密追问",
+  "player-delay": "玩家明确暂不决定",
+  "model-assume-accept": "模型擅自写成已接受",
+  "player-accept": "玩家明确接受",
+  "commit-accept": "模型据此确认关系",
+  "creative-metaphor": "自由生成一个隐喻",
+  "creative-emotion": "自由生成一个情绪反应",
+  "creative-npc": "自由生成一个 NPC 反应"
+};
+
+const scenarios = [
+  {
+    name: "时间锚点",
+    description: "模型不能无因从第一天跳到第三天；环境推进时间后，故事仍可自由书写傍晚发生什么。",
+    steps: ["jump-day3", "advance-evening", "creative-metaphor"]
+  },
+  {
+    name: "知情来源",
+    description: "同一秘密只告诉阿澜。阿澜可以据此行动，季衡不能直接读取；系统不判断季衡未来能否通过新线索合理推断。",
+    steps: ["private-alan", "jiheng-secret", "alan-secret"]
+  },
+  {
+    name: "玩家决定权",
+    description: "暂不决定后，模型不能把沉默改写成接受；玩家明确接受后才允许确认关系。",
+    steps: ["player-delay", "model-assume-accept", "player-accept", "commit-accept"]
+  },
+  {
+    name: "自由叙事",
+    description: "没有关键状态变化时，两边都允许模型创造隐喻、情绪和 NPC 反应；薄账本不要求预定义事件类型。",
+    steps: ["creative-metaphor", "creative-emotion", "creative-npc"]
+  }
+];
+
+let state = Logic.initial();
+let activeScenario = 0;
+let stepIndex = 0;
+
+const query = selector => document.querySelector(selector);
+const text = value => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function run(action, guided = false) {
+  state = Logic.dispatch(state, action);
+  if (action === "reset") stepIndex = 0;
+  else if (guided) stepIndex += 1;
+  render();
+}
+
+function resultBlock(result) {
+  return `<div class="result ${result.accepted ? "" : "reject"}"><b>${text(result.title)}</b><span class="change">${text(result.change)}</span></div>`;
+}
+
+function renderCurrent() {
+  query("#current-result").innerHTML = resultBlock(state.current.last);
+  query("#current-state").textContent = state.current.summary.join("\n");
+  query("#current-reason").textContent = state.current.last.reason;
+}
+
+function renderLedger() {
+  query("#ledger-result").innerHTML = resultBlock(state.ledger.last);
+  query("#ledger-reason").textContent = state.ledger.last.reason;
+
+  const anchors = Object.entries(state.ledger.anchors)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+  const events = state.ledger.events.map(event => {
+    const meta = [
+      `来源 ${event.source}`,
+      `时间 ${event.time}`,
+      `地点 ${event.location}`,
+      `见证 ${event.witnesses.join("、")}`,
+      `可见性 ${event.visibility}`,
+      event.causedBy.length ? `因果 ${event.causedBy.join("、")}` : null
+    ].filter(Boolean).join(" · ");
+    return `<div class="event"><b>${text(event.id)}</b> ${text(event.text)}<div class="meta">${text(meta)}</div></div>`;
+  }).join("");
+  query("#ledger-state").innerHTML = `<div class="event"><b>当前锚点</b><div class="meta">${text(anchors)}</div></div>${events}`;
+}
+
+function renderScenario() {
+  query("#tabs").innerHTML = scenarios.map((scenario, index) => {
+    return `<button data-tab="${index}" class="${index === activeScenario ? "active" : ""}">${text(scenario.name)}</button>`;
+  }).join("");
+  Array.from(query("#tabs").children).forEach(button => {
+    button.onclick = () => {
+      activeScenario = Number(button.dataset.tab);
+      stepIndex = 0;
+      state = Logic.initial();
+      render();
+    };
+  });
+
+  const scenario = scenarios[activeScenario];
+  query("#scenario-description").textContent = scenario.description;
+  query("#steps").innerHTML = scenario.steps.map((action, index) => {
+    const done = index < stepIndex;
+    const disabled = index !== stepIndex ? "disabled" : "";
+    return `<div class="step ${done ? "done" : ""}"><span>${index + 1}</span><button data-step="${index}" ${disabled}>${text(actions[action])}</button></div>`;
+  }).join("");
+  Array.from(query("#steps").querySelectorAll("button")).forEach(button => {
+    button.onclick = () => run(scenario.steps[Number(button.dataset.step)], true);
+  });
+}
+
+function renderFreeActions() {
+  query("#free-actions").innerHTML = Object.entries(actions)
+    .map(([id, label]) => `<button data-action="${id}">${text(label)}</button>`)
+    .join("");
+  Array.from(query("#free-actions").children).forEach(button => {
+    button.onclick = () => run(button.dataset.action);
+  });
+}
+
+function render() {
+  renderScenario();
+  renderFreeActions();
+  renderCurrent();
+  renderLedger();
+}
+
+render();
+</script>
+</body>
+</html>

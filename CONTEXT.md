@@ -21,7 +21,7 @@ _Avoid_: agent 自声明初始化完成、用"history 非空"推断初始化状�
 ### Player-visible Output（主角可见输出）
 回合完成后，用户能通过 Web 界面看到的内容。**只来自 `turn/output.md`**，不包含 agent stdout、内部日志、God State、NPC 私有记忆或随机判定日志。
 格式契约（Issue 12 起 orchestrator 强制校验，`src/lib/turn-output.ts`）：首行必须是 `# 主角视窗` 标题；长度失控、正文为 JSON 转储、逐字包含 random log 行或 interaction.json 原文都判"明显不合规"，回合失败回滚。语义级泄漏审查是 P1，不在此层。
-例外：**回合进行中的叙事先行预览**（性能优化分支）——pi 事件流的 write 工具参数在落盘前即含产物原文，PiRunner 在 `toolcall_end(output.md)` 时点先跑同源泄密守卫后经 Turn Progress Registry 提前推给前端。预览不是权威（POST 响应里的 committed turn 才是），回合失败/重试时前端撤回；守卫与提交校验完全同源，质量门不因提前显示放宽。
+默认只展示正式提交的正文。实验性的叙事先行预览不是权威，回滚只能撤回页面内容，不能撤回玩家已经获知的信息。
 
 ## 叙事与主角相关
 
@@ -127,9 +127,16 @@ _Avoid_: 玩家随机记录、调试面板、可见骰点
 Issue 6 引入。把 Random Tool 库函数（`rollChoice`）包装成 CLI 子进程可调用的接口，供 Claude Code Runner 经 Bash 工具调用。输入为 stdin JSON，输出为 stdout JSON（`RollChoiceResult`）。复用 `random-tool.ts` 领域逻辑，不重复实现。是 Agent Runner（子进程）与 Random Tool（库函数）之间的桥接层。
 _Avoid_: MCP server、随机工具重实现、agent 内置随机
 
-### Pre-rolled Random Pool（预掷随机数池）
-Pi Runner 路径的随机判定通道（性能优化分支）：pi 禁 bash，无法调用 Random Tool CLI Wrapper；改为服务端在回合前 crypto 预生成一池 `[0,1)` 样本注入 prompt 末尾，模型按序消耗做 Roll Choice，在 State Update Bundle 的 `=== RANDOM ===` 申报段报告消耗，服务端用自持样本重算权威 Binding Random Outcome 并落账 Random Log（`random-tool.ts recordPoolRoll`）。池在回合内跨重试固定（防故意失败刷点）；消耗严格按 R1,R2,… 顺序核对（防挑号）。
-_Avoid_: 给 pi 恢复 bash、模型自造随机数、把池值或申报内容写进玩家可见输出
+### Random Request（随机请求）
+在抽取结果之前确定的一批候选结果与权重。请求被接受后候选即冻结，随后产生 Binding Random Outcome；模型不能预先知道样本，生成重试也不能更改候选或重抽。
+_Avoid_: 看过随机数再定权重、失败后刷点、无请求自行宣告随机结果
+
+### Random Acknowledgment（随机确认）
+叙事候选对已绑定随机结果的逐项确认，必须与原候选、次序及结果一致才可提交。确认一致是必要条件，不代表程序已经证明自然语言正文在语义上服从结果。
+_Avoid_: 不一致仅告警、把日志正确等同于正文正确
+
+### Pre-rolled Random Pool（预掷随机数池，历史方案）
+已被 Random Request 替代的随机通道：过去会提前把随机样本提供给模型，再核对申报。它不能保证模型先定候选后获知结果，不再是当前回合契约。
 
 ## Agent 相关
 
@@ -151,7 +158,7 @@ _Issue 14 起权限模式（性能优化分支实测修正）_：claude CLI 2.1.
 _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 orchestrator invariant
 
 ### Pi Runner（pi 运行器）
-性能优化分支（2026-08）引入的 Pi Runner 同时承载 Story Turn 与 Story Initialization。服务端按 `req.task` 选择内部计划：turn 预注入全部 workspace 上下文并写增量 State Update Bundle；init 先执行 Phase 1（预注入用户 canon/骨架，只写完整 Init Workspace Bundle），应用概念文件后再执行 Phase 2（只预注入主角可见 opening context，只写 output/interaction）。每阶段候选都由服务端校验，成功后才写 Done Marker；init 不注入随机池。模型禁止读文件，工具面收窄至 write，每次冷启动、无会话记忆（磁盘是唯一真相）；内置自动重试和 mtime 新鲜度门，避免残留产物蒙混提交。Pi 启动时显式加载仓库内受控 write extension，按阶段放行精确候选文件；每个 init attempt 结束后再用完整 workspace manifest 做纵深校验，越权变化交给 Orchestrator 快照回滚。`--mode json` 事件流驱动叙事先行预览（init 仅在 Phase 2 两个候选事件都到齐后发布，见 Player-visible Output 词条例外）。模型锁定 qwen-fp8。
+承载 Story Turn 与 Story Initialization 的 Agent Runner；只生成候选，故事正式状态和历史由受信任系统校验并提交。风险回合先提交 Random Request，再依据 Binding Random Outcome 生成内容；状态与随机确认失败不得提交正文。
 2026-08-23 第二轮真实 A/B 因安全收口仅部分执行：Pi 在 S01–S03 均连续两次未通过 Phase 1 Bundle 新鲜/完整门（`init bundle missing or stale`），Claude S01–S03 成功；S04 Claude 在完成前中止，S04 Pi 与 S05 未执行。该结果不是完整质量验收，下一步先诊断 Pi Phase 1 的事件、extension/path、prompt 和 Bundle 写盘证据，再本地测试并重新授权；不得据此删除 Claude。
 
 ### Turn Progress Registry（回合进度注册表）
@@ -159,11 +166,27 @@ _Avoid_: 永久 agent、产品运行时、会话型 agent、以权限层替代 o
 _Avoid_: 会话复用跨回合（传染性漂移）、模型直连结构化输出、恢复 bash/read 工具、qwen 思考档位调参（网关无视且 low/off 诱发口述失效）
 
 ### State Update Bundle（状态变更单）
-`turn/state-update.md`：Pi Runner 回合中全部状态文件变更的合并载体（每段 `=== FILE: 文件名 ===` + APPEND/REPLACE 行）。服务端解析并应用到白名单内文件（world/player/actors/adjustments/tendencies），白名单外或解析失败降级不致命。另有 `=== RANDOM ===` 申报段承载 Pre-rolled Random Pool 的消耗申报（不是文件段，由服务端核对落账）。是回合内部中间产物，不是故事状态本身。
+一个回合全部状态变更的候选载体，包含必要的 Random Acknowledgment；完全无状态变化也必须明确声明。候选整体有效后才能提交，缺失、部分失败或越权都不能当作成功；它不是故事状态本身。
 _Avoid_: 让模型逐文件多次写盘、把 Bundle 当作新的故事状态源
 
+### Complete Turn Candidate（完整回合候选）
+同一次生成交付的玩家正文、交互状态与 State Update Bundle，三者共同接受校验后才成为正式 Story Turn；单独一段小说不构成完整候选。
+_Avoid_: 把模型回复直接当作已提交回合、缺少状态时默认成功
+
+### Public Scene（公开场景）
+某个叙事时点的公开资料：时间、地点、主角声音、主角已知事实和可观察人物，不包含“主角尚不知道的秘密”。它是叙事所需信息的明确交接，不是模型内容在语义上绝不泄漏的证明。
+_Avoid_: 整张人物卡、秘密清单、用开场快照覆盖后续当前状态
+
+### Public Continuity Card（公开连续性卡片）
+供叙事模型保持连续性的最小事实视图：完整呈现已公开的事件顺序、尚未确认的因果与尚未决定的选择；未公开事实只呈现抽象知情范围，不重复秘密正文。它不是新的故事事实来源，也不负责推断人物动机或剧情走向。
+_Avoid_: 通用事实账本、秘密正文重注入、语义权威层、剧情状态机
+
+### Knowledge Boundary（知情边界）
+对未公开事实的抽象可见性约束，只说明哪些角色可能知情，以及其他角色不得表现出知情；不重复事件内容、地点、时间或因果标识。
+_Avoid_: 秘密摘要、把“模型知道”当成“角色知道”、用否定句复述秘密正文
+
 ### Init Workspace Bundle（初始化工作区包）
-`turn/state-update.md` 在 init Phase 1 时改为完整文件段：每段 `=== FILE: ... ===` 后是完整正文，必须恰好包含 `world.md`、`player.md`、`rules.md` 各一份及至少一张 `actors/*.md`；每张 actor 还必须有独立的 Emotional Core、Relationship State、Emotionally Salient Memories、Current Intent 标题。服务端先整体解析/校验路径、重复、空内容、占位与越权，再批量应用；无效 attempt 不得部分写入，重试耗尽不写 Done Marker。Phase 2 从已应用概念文件构造只含 player 可见字段与 actor 标题/表面形象/voice 的 opening context，只允许 output/interaction。每个 Pi init attempt 还会对 Story Workspace 做完整文件/目录 manifest，按阶段 allowlist 比对；任何其他新增、删除或改写都立即失败且不重试，由 Orchestrator 快照回滚。init 不使用 `APPEND/REPLACE` 或随机池。
+Story Initialization 的完整初始状态候选，包含世界、主角、规则、核心人物和独立 Public Scene；开场叙事只接收公开场景，不直接接收内部设定。它必须整体有效才能被采用，不能把缺少公开时间、地点或人物结构的片段当作完成初始化。
 
 ### Runner 切换（Runner Selection）
 Web/API 层通过环境变量 `AGENT_RUNNER` 选择具体 Agent Runner 实现（`fake` / `pi` / `claude`），默认 `fake`。`pi` 模式下 init 与 turn 共用同一个 PiRunner；`claude` 模式下按 Runner Task 分发：turn → Pi Runner，init → Claude Code Runner（A/B 基线，第一阶段保留）。单例位于 `src/lib/runner-selection.ts`：story-turn 与 initialize 两个 route 共享同一个 TurnOrchestrator 实例（及其进程内 TurnLock），保证 init 与 turn 对同一 storyId 互斥串行。docker-compose 默认不启用真实 runner，Pi 与 Claude 分别由覆盖文件选择。vitest 契约测试始终用 `fake`/`fake-pi`，不依赖真实 CLI/凭证/网络。
@@ -237,7 +260,7 @@ _Avoid_: 与主角运行时混淆、单次行为自动升级为稳定人格
 - 一个成功提交的 **Random Judgment** 应产生一条对应的 **Random Log**。
 - **Player-visible Output** 可以呈现 **Binding Random Outcome** 的可见后果，但不能直接展示 **Random Log**。
 - 失败并回滚的 **Story Turn** 不保留本回合产生的 **Random Log**；只有成功回合的随机判定成为故事状态的一部分。
-- **Claude Code Runner** 作为子进程执行回合时，经 Bash 工具调用 **Random Tool CLI Wrapper** 完成 **Roll Choice**；**Fake Agent Runner** 直接在进程内调用 `rollChoice` 库函数；**Pi Runner**（Story Turn；Story Initialization 不注入随机池）经 **Pre-rolled Random Pool** 完成同样的 Roll Choice，**Random Log** 由服务端权威重算落账——三条路径产生相同的 **Random Log** 与 **Binding Random Outcome** 契约。
+- **Pi Runner** 先提交 **Random Request**，服务端随后产生 **Binding Random Outcome**；**Random Acknowledgment** 与正文、状态同批校验提交，成功回合才保留 **Random Log**。**Fake Agent Runner** 使用同一 **Roll Choice** 判定机制。
 - **Runner 切换** 决定 **Turn Orchestrator** 持有哪个 **Agent Runner** 实例，但 **Turn Orchestrator** 的生命周期编排逻辑（锁、快照、磁盘权威、回滚）不随 runner 变化。
 - **Story Initialization** 以 **Runner Task** `init` 经同一 **Turn Orchestrator** 执行；用户设定中的角色卡等明确内容是 canon，agent 只能补全不能改写。
 - 成功的 **Story Initialization** 产生一条 **Opening Entry** 并写入 **Initialized Marker**；两者在同一提交批次内，任一失败则整体回滚。

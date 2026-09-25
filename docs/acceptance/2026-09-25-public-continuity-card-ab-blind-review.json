@@ -1,0 +1,17 @@
+{
+  "reviewedAt": "2026-09-25",
+  "run": "public-continuity-card-ab-round3-20260925",
+  "reviewMode": "blind",
+  "rubric": "semantic continuity, decision preservation, private-information isolation, naturalness",
+  "judgments": [
+    {"packet":"review-heldout-causal-continuity-1.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both preserve the single sound, safe position, and unresolved cause; text1 marks the unobserved interval more carefully and adds fewer asserted equipment details."},
+    {"packet":"review-heldout-causal-continuity-2.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both keep the cause unresolved; text1 gives a cleaner event order while text2's wording around whether to inspect or tag first is less precise."},
+    {"packet":"review-heldout-causal-continuity-3.json","preference":"text1","text1":"pass","text2":"hard_error","reason":"Text1 reports only witnessed facts; text2 asserts nobody was in the pulley area during minutes when the speaker was away and could not verify that claim."},
+    {"packet":"review-heldout-open-decision-1.json","preference":"text2","text1":"hard_error","text2":"pass","reason":"Text1 fabricates annual cycles, spring rotation, occupied slots, and candidate pressure. Text2 explicitly treats the missing deadline and consequences as unknown, although it adds some nonessential procedure detail."},
+    {"packet":"review-heldout-open-decision-2.json","preference":"text1","text1":"pass","text2":"hard_error","reason":"Text1 preserves the unknown deadline and the player's open choice. Text2 invents a next-week deadline, immediate invalidation, one-year delay, and a temporary slot hold."},
+    {"packet":"review-heldout-open-decision-3.json","preference":"text1","text1":"pass","text2":"hard_error","reason":"Text1 states that no authoritative deadline or downstream rule is available. Text2 invents roster locking, default abandonment, candidates, and a one-year wait."},
+    {"packet":"review-heldout-private-info-1.json","preference":"text2","text1":"hard_error","text2":"pass","reason":"Text1 has the NPC ask whether the player touched the cabinet area, strongly implying access to undisclosed private context. Text2 keeps the NPC focused on the missing record."},
+    {"packet":"review-heldout-private-info-2.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both keep the NPC unaware; text1 is more natural and surfaces the private fact less mechanically in internal narration."},
+    {"packet":"review-heldout-private-info-3.json","preference":"ineligible","text1":"not_scored","text2":"technical_failure","reason":"Excluded from semantic preference because one side has no model output."}
+  ]
+}

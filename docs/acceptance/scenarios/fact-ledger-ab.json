@@ -1,0 +1,183 @@
+{
+  "experiment": "fact-ledger-injection",
+  "model": "deepseek-v4.1-flash",
+  "repeatsPerArm": 3,
+  "automaticRetries": 0,
+  "arms": ["baseline", "ledger"],
+  "order": [
+    ["baseline", "ledger"],
+    ["ledger", "baseline"],
+    ["baseline", "ledger"]
+  ],
+  "cases": [
+    {
+      "id": "private-info",
+      "dimension": "information-disclosure",
+      "title": "北门暗格",
+      "fixture": {
+        "world": "# 世界\n\n当前时间是第三夜。旧档案馆北门暗格里藏着半张海图，只有主角亲眼见过。岑雾从未见过暗格，也不知道海图存在。\n",
+        "player": "# 主角\n\n我是谨慎的档案员，第一人称限知叙事。遇到未核实信息时，我倾向先试探，不直接交底。\n\n## Public Scene\n\n```json\n{\"time\":\"第三夜\",\"location\":\"旧档案馆北门\",\"narrativeVoice\":\"第一人称，克制而具体\",\"knownFacts\":[\"主角独自知道暗格里有半张海图\"],\"visibleActors\":[{\"name\":\"岑雾\",\"appearance\":\"灰外套，站在北门内侧\",\"voice\":\"短句，直接\"}]}\n```\n\n## Player Agency\n\n不得替玩家披露尚未选择公开的证据。\n",
+        "actorFile": "岑雾.md",
+        "actor": "# 岑雾\n\n## 表面信息\n夜班管理员，只负责看门和登记。\n\n## Emotional Core\n- coreNeed：保住工作。\n- coreFear：被牵连进偷窃。\n- vulnerability：不熟悉北门暗格。\n- defensivePattern：要求证据。\n- approachPattern：如实说明自己看到的事。\n- retreatPattern：不猜测。\n\n## Relationship State\n- surfaceRelationship：普通同事。\n- privateMeaning：主角最近神色不安。\n- desiredPosition：平稳合作。\n- perceivedPosition：略被怀疑。\n- approachImpulse：问清情况。\n- avoidanceImpulse：不主动惹事。\n- unresolvedQuestion：主角为什么夜里来北门。\n- currentTension：低。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：警觉。\n- emotionalTrigger：主角夜里靠近北门。\n- emotionalConflict：好奇 vs 不想越权。\n- immediateGoal：问主角是否发现异常。\n- hiddenIntent：确认自己是否会被牵连。\n- restraint：不指控。\n- behaviorStrategy：问一句，观察回答。\n- voice：短句，不解释。\n",
+        "opening": "# 主角视窗\n\n第三夜，北门的旧锁很冷。岑雾从灯影里走出来，问我是不是又听见响动了。\n",
+        "priorHistory": [
+          {
+            "turnId": "t1",
+            "at": "2026-09-25T10:00:00.000Z",
+            "input": "我去北门检查。",
+            "output": "# 主角视窗\n\n我打开暗格，看见半张海图，随后合上暗格。岑雾没有看见。"
+          }
+        ]
+      },
+      "playerInput": "我不提海图，也不说暗格，只问岑雾：\"你今晚有没有看见有人从北门出去？\"",
+      "ledger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "e1",
+            "text": "主角独自看见北门暗格里有半张海图。",
+            "source": "player",
+            "time": "第三夜",
+            "location": "旧档案馆北门",
+            "witnesses": ["主角"],
+            "visibility": "private",
+            "causedBy": []
+          },
+          {
+            "id": "e2",
+            "text": "岑雾没有看见暗格或海图。",
+            "source": "system",
+            "time": "第三夜",
+            "location": "旧档案馆北门",
+            "witnesses": [],
+            "visibility": "public",
+            "causedBy": ["e1"]
+          }
+        ]
+      },
+      "blindChecklist": [
+        "正文没有让岑雾知道海图或暗格内容",
+        "正文没有替主角披露主角未公开的事实",
+        "岑雾的回答只基于他自己能知道的信息",
+        "叙事仍然自然推进，不是机械复述事实"
+      ],
+      "advisoryTokens": ["海图", "暗格"]
+    },
+    {
+      "id": "open-decision",
+      "dimension": "player-major-decision",
+      "title": "调令未签",
+      "fixture": {
+        "world": "# 世界\n\n当前时间是次日清晨。两份互斥调令摆在桌上，驻港一年或随船离港一年。两份都未签署，选择仍开放。只有主角签字才能生效。\n",
+        "player": "# 主角\n\n我是航务测绘员，第一人称限知叙事。重大决定必须由我自己明确作出。\n\n## Public Scene\n\n```json\n{\"time\":\"次日清晨\",\"location\":\"航务室\",\"narrativeVoice\":\"第一人称，清醒而审慎\",\"knownFacts\":[\"两份调令互斥\",\"当前尚未签署\"],\"visibleActors\":[{\"name\":\"闻策\",\"appearance\":\"制服袖口沾着盐渍，把笔放在桌边\",\"voice\":\"简洁，愿意说明后果\"}]}\n```\n\n## Player Agency\n\n驻港、随船、签署或拒签都是我的重大决定，系统不得代选。\n",
+        "actorFile": "闻策.md",
+        "actor": "# 闻策\n\n## 表面信息\n航务官，负责解释调令，无权替主角签字或宣布选择。\n\n## Emotional Core\n- coreNeed：程序清楚。\n- coreFear：事后被说被迫。\n- vulnerability：任命期限临近。\n- defensivePattern：逐条列后果。\n- approachPattern：回答具体问题。\n- retreatPattern：不催促。\n\n## Relationship State\n- surfaceRelationship：工作关系。\n- privateMeaning：主角需要完整信息。\n- desiredPosition：可信的说明者。\n- perceivedPosition：正式。\n- approachImpulse：讲清代价。\n- avoidanceImpulse：不施压。\n- unresolvedQuestion：主角最终选哪条路。\n- currentTension：任命期限临近。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：耐心。\n- emotionalTrigger：主角要求说明。\n- emotionalConflict：期限紧 vs 尊重选择。\n- immediateGoal：分别说明两边代价。\n- hiddenIntent：确认主角理解不可逆。\n- restraint：不替主角选。\n- behaviorStrategy：列后果，停下等待。\n- voice：短句，具体。\n",
+        "opening": "# 主角视窗\n\n航务室的灯还亮着。闻策把笔放在两份调令之间，问我是否已经想清楚。\n",
+        "priorHistory": [
+          {
+            "turnId": "t1",
+            "at": "2026-09-25T10:00:00.000Z",
+            "input": "我说再想想。",
+            "output": "# 主角视窗\n\n我没有碰笔。闻策说选择可以留到明天。"
+          }
+        ]
+      },
+      "playerInput": "我不拿笔，也不选驻港或随船。我只说：\"先把两边各自会失去什么讲清楚。\"",
+      "ledger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "e1",
+            "text": "两份调令互斥，签字才会生效。",
+            "source": "system",
+            "time": "次日清晨",
+            "location": "航务室",
+            "witnesses": ["主角", "闻策"],
+            "visibility": "public",
+            "causedBy": []
+          },
+          {
+            "id": "e2",
+            "text": "主角尚未签署任何调令，也未作出选择。",
+            "source": "player",
+            "time": "次日清晨",
+            "location": "航务室",
+            "witnesses": ["主角", "闻策"],
+            "visibility": "public",
+            "causedBy": ["e1"]
+          }
+        ]
+      },
+      "blindChecklist": [
+        "正文没有替主角签署、选择或形成等价承诺",
+        "闻策没有宣布主角已选哪条路",
+        "叙事仍停在需要玩家决定的 decision 状态",
+        "说明的代价与两份调令的互斥性一致"
+      ],
+      "advisoryTokens": ["我签", "签下", "选择驻港", "选择随船", "调令生效"]
+    },
+    {
+      "id": "causal-continuity",
+      "dimension": "time-causality",
+      "title": "北堤断裂",
+      "fixture": {
+        "world": "# 世界\n\n当前时间是第三夜潮水上涨之后。地点是北堤观测台。今夜北堤出现了一道新裂缝，尚未查明原因。若要进入裂缝，必须先等潮水退去。主角目前不知道裂缝成因。\n",
+        "player": "# 主角\n\n我是堤坝巡查员，第一人称限知叙事。我不凭空推断未知原因，重大判断需要证据。\n\n## Public Scene\n\n```json\n{\"time\":\"第三夜涨潮后\",\"location\":\"北堤观测台\",\"narrativeVoice\":\"第一人称，克制而具体\",\"knownFacts\":[\"北堤出现新裂缝\",\"主角不知道裂缝成因\"],\"visibleActors\":[{\"name\":\"柳青\",\"appearance\":\"穿雨衣，手里拿着记录本\",\"voice\":\"短句，先讲事实\"}]}\n```\n\n## Player Agency\n\n不得替我虚构未知原因或跳过必要等待。\n",
+        "actorFile": "柳青.md",
+        "actor": "# 柳青\n\n## 表面信息\n堤坝记录员，负责登记可见事实。\n\n## Emotional Core\n- coreNeed：记录准确。\n- coreFear：报告失实。\n- vulnerability：只有局部视野。\n- defensivePattern：只说看见的。\n- approachPattern：按时间顺序叙述。\n- retreatPattern：不做因果推断。\n\n## Relationship State\n- surfaceRelationship：同事。\n- privateMeaning：主角重视证据。\n- desiredPosition：可靠合作。\n- perceivedPosition：专业。\n- approachImpulse：补充可见事实。\n- avoidanceImpulse：不猜原因。\n- unresolvedQuestion：裂缝为何出现。\n- currentTension：潮水仍在高位。\n- recentEvidence：无。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：紧张。\n- emotionalTrigger：裂缝扩大。\n- emotionalConflict：想查明原因 vs 不能臆测。\n- immediateGoal：先记录裂缝宽度。\n- hiddenIntent：避免上级要求立刻进堤洞。\n- restraint：不编造成因。\n- behaviorStrategy：只讲可见事实。\n- voice：短句，克制。\n",
+        "opening": "# 主角视窗\n\n北堤观测台的玻璃上全是水雾。柳青把记录本压在灯下，说裂缝是今夜才出现的。\n",
+        "priorHistory": [
+          {
+            "turnId": "t1",
+            "at": "2026-09-25T10:00:00.000Z",
+            "input": "我去北堤。",
+            "output": "# 主角视窗\n\n我赶到北堤时，潮水正涨。柳青指着堤面说，裂缝是刚发现的。"
+          }
+        ]
+      },
+      "playerInput": "我不进裂缝，也不猜原因。我只说：\"先把裂缝出现前后你看见的事按时间说清楚。\"",
+      "ledger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "e1",
+            "text": "今夜北堤出现一道新裂缝。",
+            "source": "system",
+            "time": "第三夜涨潮前",
+            "location": "北堤观测台",
+            "witnesses": ["主角", "柳青"],
+            "visibility": "public",
+            "causedBy": []
+          },
+          {
+            "id": "e2",
+            "text": "裂缝成因尚未查明，主角和柳青都不知道。",
+            "source": "system",
+            "time": "第三夜涨潮后",
+            "location": "北堤观测台",
+            "witnesses": ["主角", "柳青"],
+            "visibility": "public",
+            "causedBy": ["e1"]
+          },
+          {
+            "id": "e3",
+            "text": "潮水未退前不得进入裂缝。",
+            "source": "system",
+            "time": "第三夜涨潮后",
+            "location": "北堤观测台",
+            "witnesses": ["主角", "柳青"],
+            "visibility": "public",
+            "causedBy": ["e1"]
+          }
+        ]
+      },
+      "blindChecklist": [
+        "时间顺序没有无因跳变",
+        "正文没有虚构裂缝成因",
+        "主角没有在潮水未退时进入裂缝",
+        "柳青只叙述她能看见的事实，不替未知原因作结论"
+      ],
+      "advisoryTokens": ["我走进裂缝", "裂缝是因为", "潮水退去后我进入", "我进入裂缝"]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "reviewedAt": "2026-09-25",
+  "run": "fact-ledger-ab-round2-qDXNK4",
+  "reviewMode": "blind",
+  "rubric": "semantic continuity, decision preservation, private-information isolation, naturalness",
+  "judgments": [
+    {"packet":"review-heldout-causal-continuity-1.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both preserve the event order and unknown cause; text1 is more epistemically careful and adds less unsupported material."},
+    {"packet":"review-heldout-causal-continuity-2.json","preference":"text2","text1":"pass","text2":"pass","reason":"Both avoid asserting a cause; text2 stays closer to observed facts and adds fewer speculative details."},
+    {"packet":"review-heldout-causal-continuity-3.json","preference":"text2","text1":"hard_error","text2":"pass","reason":"Text1 invents a second impact sound; text2 preserves the single known event and unresolved cause."},
+    {"packet":"review-heldout-open-decision-1.json","preference":"tie","text1":"hard_error","text2":"hard_error","reason":"Both preserve the choice but fabricate deadline, scarcity, or default-consequence rules."},
+    {"packet":"review-heldout-open-decision-2.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both keep the decision open; text1 explains the tradeoff directly and adds fewer unsupported procedural details."},
+    {"packet":"review-heldout-open-decision-3.json","preference":"ineligible","text1":"technical_failure","text2":"not_scored","reason":"Excluded from semantic preference because one side has no model output."},
+    {"packet":"review-heldout-private-info-1.json","preference":"text1","text1":"pass","text2":"hard_error","reason":"Text1 keeps the NPC unaware; text2 makes the NPC cabinet remark strongly imply undisclosed private knowledge."},
+    {"packet":"review-heldout-private-info-2.json","preference":"text2","text1":"pass","text2":"pass","reason":"Both keep the NPC unaware; text2 avoids mechanically surfacing the private fact in narration and reads more naturally."},
+    {"packet":"review-heldout-private-info-3.json","preference":"text1","text1":"pass","text2":"pass","reason":"Both avoid disclosure; text1 is cleaner because it does not point narration toward the private cabinet fact."}
+  ]
+}

@@ -182,13 +182,11 @@ function validateActorStructure(content: string): string | null {
   ) {
     return null;
   }
-  const requiredMemoryFields: Array<[string, RegExp]> = [
-    ["event", /(?:^|\n)\s*(?:[-*]\s*)?(?:event|事件)\s*[:：]/iu],
-    ["meaning", /(?:^|\n)\s*(?:[-*]\s*)?(?:meaning|含义|意义)\s*[:：]/iu],
-    ["impact", /(?:^|\n)\s*(?:[-*]\s*)?(?:impact|影响)\s*[:：]/iu],
-  ];
-  for (const [field, pattern] of requiredMemoryFields) {
-    if (!pattern.test(memoriesBody)) return `actor memories are missing ${field}`;
+  const memoryEntries = splitMemoryEntries(content, memoriesHeading, headings);
+  for (const entry of memoryEntries) {
+    for (const field of ["event", "meaning", "impact"] as const) {
+      if (!hasMemoryField(entry, field)) return `actor memories are missing ${field}`;
+    }
   }
   return null;
 }
@@ -200,6 +198,92 @@ interface MarkdownHeading {
   bodyEnd: number;
 }
 
+type MemoryField = "event" | "meaning" | "impact";
+
+function splitMemoryEntries(
+  content: string,
+  memoriesHeading: MarkdownHeading,
+  headings: MarkdownHeading[],
+): string[] {
+  const lines = content.split(/\r?\n/);
+  const nestedHeadings = headings.filter(
+    (heading) =>
+      heading.level > memoriesHeading.level &&
+      heading.bodyStart > memoriesHeading.bodyStart &&
+      heading.bodyStart <= memoriesHeading.bodyEnd,
+  );
+  const itemCandidates = nestedHeadings.filter(
+    (heading) => normalizeMemoryFieldLabel(heading.title) === null,
+  );
+  if (itemCandidates.length > 0) {
+    const itemLevel = Math.min(...itemCandidates.map((heading) => heading.level));
+    return itemCandidates
+      .filter((heading) => heading.level === itemLevel)
+      .map((heading) => {
+        const end = Math.min(heading.bodyEnd, memoriesHeading.bodyEnd);
+        return [heading.title, ...lines.slice(heading.bodyStart, end)].join("\n");
+      });
+  }
+
+  const bodyLines = lines.slice(memoriesHeading.bodyStart, memoriesHeading.bodyEnd);
+  const numberedLines = bodyLines
+    .map((line, index) => {
+      const match = line.match(/^\s*\d+[.)]\s+(.+)$/u);
+      return match ? { index, rest: match[1] ?? "" } : null;
+    })
+    .filter((line): line is { index: number; rest: string } => line !== null);
+  const numberedEventStarts = numberedLines
+    .filter((line) => normalizeMemoryFieldLabel(line.rest) === "event")
+    .map((line) => line.index);
+  if (numberedEventStarts.length >= 2) return splitLinesAt(bodyLines, numberedEventStarts);
+  if (numberedLines.length >= 2 && numberedEventStarts.length === 0) {
+    return splitLinesAt(
+      bodyLines,
+      numberedLines.map((line) => line.index),
+    );
+  }
+
+  const eventStarts = bodyLines
+    .map((line, index) => (memoryFieldFromLine(line) === "event" ? index : -1))
+    .filter((index) => index >= 0);
+  if (eventStarts.length >= 2) return splitLinesAt(bodyLines, eventStarts);
+  return [bodyLines.join("\n")];
+}
+
+function splitLinesAt(lines: string[], starts: number[]): string[] {
+  return starts.map((start, index) => lines.slice(start, starts[index + 1]).join("\n"));
+}
+
+function hasMemoryField(entry: string, wanted: MemoryField): boolean {
+  return entry.split(/\r?\n/).some((line) => memoryFieldFromLine(line) === wanted);
+}
+
+function memoryFieldFromLine(line: string): MemoryField | null {
+  const heading = line.match(/^\s*#{1,6}\s+(.+?)\s*$/u);
+  if (heading) return normalizeMemoryFieldLabel(heading[1] ?? "");
+  if (!/[:：]/u.test(line)) return null;
+  return normalizeMemoryFieldLabel(line);
+}
+
+function normalizeMemoryFieldLabel(value: string): MemoryField | null {
+  let label = value.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/u, "");
+  label = stripMarkdownEmphasis(label).replace(/[:：].*$/u, "").trim();
+  label = stripMarkdownEmphasis(label).toLocaleLowerCase();
+  if (label === "event" || label === "事件") return "event";
+  if (label === "meaning" || label === "含义" || label === "意义") return "meaning";
+  if (label === "impact" || label === "影响") return "impact";
+  return null;
+}
+
+function stripMarkdownEmphasis(value: string): string {
+  let result = value.trim();
+  while (true) {
+    const match = result.match(/^(?:\*\*|__)([\s\S]*)(?:\*\*|__)$/u);
+    if (!match) return result;
+    result = (match[1] ?? "").trim();
+  }
+}
+
 function extractMarkdownHeadings(content: string): MarkdownHeading[] {
   const lines = content.split(/\r?\n/);
   const headings: MarkdownHeading[] = [];
@@ -207,8 +291,9 @@ function extractMarkdownHeadings(content: string): MarkdownHeading[] {
     const match = line.match(/^\s*(#{1,6})\s+(.+?)\s*$/);
     if (!match) return;
     const level = match[1]?.length ?? 1;
-    const previous = headings[headings.length - 1];
-    if (previous && level <= previous.level) previous.bodyEnd = index;
+    for (const previous of headings) {
+      if (previous.level >= level && previous.bodyEnd > index) previous.bodyEnd = index;
+    }
     headings.push({
       title: match[2] ?? "",
       level,
@@ -222,8 +307,11 @@ function extractMarkdownHeadings(content: string): MarkdownHeading[] {
 function normalizeHeading(title: string): string {
   return title
     .trim()
+    .replace(/^(?:\*\*|__)([\s\S]*)(?:\*\*|__)$/u, "$1")
     .replace(/[:：].*$/u, "")
     .replace(/[（(].*?[）)]/gu, "")
+    .replace(/^(?:\*\*|__)([\s\S]*)(?:\*\*|__)$/u, "$1")
+    .replace(/^\d+\s*[.)]\s*/u, "")
     .trim()
     .toLocaleLowerCase();
 }
