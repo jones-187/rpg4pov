@@ -83,6 +83,7 @@ DeepSeek 隔离连续10回合随后启动，但按规则在正式第5回合首�
 - [x] 有限格式修正（Harness 第二次调用会收到上一份完整响应、精确缺失/多余字段及“只改结构不改语义”约束；仍经过原严格校验，默认最多两次，不自动补语义字段。Kimi 全新9样本从首次7/9提升为最终9/9，共11次调用，证明格式不再是模型淘汰条件。详见[`acceptance/2026-09-26-continuity-maintenance-kimi-k3-format-repair-result.md`](acceptance/2026-09-26-continuity-maintenance-kimi-k3-format-repair-result.md)）
 - [ ] Kimi K3 候选验证（有限格式修正后最终技术9/9，但最终卡片语义仅7/9：一张把NPC陈述标为system，一张把玩家输入与NPC回应合并后整体标为model。Kimi不因格式淘汰，但仍因来源归属语义错误不晋级、不换默认模型。后续统一分开统计首次格式、有限修正后技术交付和最终语义。详见[`acceptance/2026-09-26-continuity-maintenance-kimi-k3-format-repair-result.md`](acceptance/2026-09-26-continuity-maintenance-kimi-k3-format-repair-result.md)）
 - [ ] GLM-5.3-Flash 候选验证（同一有限格式修正筛查最终技术9/9、首次8/9、共10次调用；语义8/9，无来源/见证者错标、泄密或代选，但一张卡把评测日期写入虚构故事时间，另有2个软问题。比Kimi更接近目标，与DeepSeek硬错误计数小样本并列；按门槛不晋级、不切默认。详见[`acceptance/2026-09-26-continuity-maintenance-glm53-flash-format-repair-result.md`](acceptance/2026-09-26-continuity-maintenance-glm53-flash-format-repair-result.md)）
+- [x] GLM-5.3-Flash 完整 A/B（36回合、53次调用；maintained 技术17/18优于static 15/18，但5个可比配对仅maintained胜1、static胜2、平2；9张维护卡3张把无依据任命细节写成文件明文。技术门槛通过，叙事与硬语义门槛失败，不换默认模型、不增加GLM兜底。详见[`acceptance/2026-09-26-continuity-maintenance-glm53-flash-full-ab-result.md`](acceptance/2026-09-26-continuity-maintenance-glm53-flash-full-ab-result.md)）
 - [ ] 真实长局验收（2026-09-20 已获授权；真实小样本未过门槛，停止长局，详见 `acceptance/2026-09-20-real-pilot.md`）
 
 ## 真实验收后调整优先级（2026-09-20）

@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const factLedgerEvaluator = require("./fact-ledger-ab-eval.cjs");
 
 const ARMS = ["static", "maintained"];
+const EVALUATION_MODELS = new Set(["deepseek-v4.1-flash", "glm-5.3-flash"]);
 const OPENING_TURN_ID = "00000000-0000-4000-8000-000000000002";
 const OPENING_AT = "2026-09-26T10:00:00.000Z";
 const TECHNICAL_FAILURE_TEXT = "TECHNICAL FAILURE — NO PLAYER OUTPUT";
@@ -35,13 +36,17 @@ function requireStringArray(value, field) {
 function validateScenario(scenario) {
   if (!isRecord(scenario)) throw new Error("scenario must be an object");
   requireString(scenario.experiment, "scenario.experiment");
-  if (scenario.model !== "deepseek-v4.1-flash") {
-    throw new Error("scenario.model must be deepseek-v4.1-flash");
+  if (!EVALUATION_MODELS.has(scenario.model)) {
+    throw new Error(`scenario.model must be one of: ${[...EVALUATION_MODELS].join(", ")}`);
   }
   if (scenario.piThinking !== "xhigh") {
     throw new Error("scenario.piThinking must be xhigh (Pi max)");
   }
   if (scenario.repeatsPerArm !== 3) throw new Error("scenario.repeatsPerArm must be 3");
+  const callsPerTurn = scenario.callsPerTurn ?? 1;
+  if (callsPerTurn !== 1 && callsPerTurn !== 2) {
+    throw new Error("scenario.callsPerTurn must be 1 or 2");
+  }
   if (scenario.automaticRetries !== 0) throw new Error("scenario.automaticRetries must be 0");
   if (!Array.isArray(scenario.arms) || scenario.arms.length !== 2
     || scenario.arms.some((arm, index) => arm !== ARMS[index])) {
@@ -109,8 +114,10 @@ function validateScenario(scenario) {
   return scenario;
 }
 
-function shouldContinueAfterTurn(record) {
-  return record.modelCallRequests === 1 && factLedgerEvaluator.shouldContinueAfterRun(record);
+function shouldContinueAfterTurn(record, maximumCalls = 1) {
+  return record.modelCallRequests >= 1
+    && record.modelCallRequests <= maximumCalls
+    && record.modelCalls === record.modelCallRequests;
 }
 
 function randomBlindFileId() {
@@ -463,6 +470,7 @@ async function runChain({
   initialLedger,
   manifest,
   writeManifest,
+  maxModelCalls = 1,
 }) {
   const { createStory, resolveWorkspaceDir, writeContinuityCard, CONTINUITY_CARD_FILE } = runtimeModules.workspace;
   const { appendTurnHistory } = runtimeModules.turnHistory;
@@ -517,9 +525,10 @@ async function runChain({
     runDir,
     manifest,
     writeManifest,
+    maxModelCalls,
   });
-  if (!shouldContinueAfterTurn(turn1)) {
-    const error = new Error("turn 1 violated the one-call evaluation budget");
+  if (!shouldContinueAfterTurn(turn1, maxModelCalls)) {
+    const error = new Error("turn 1 violated the bounded evaluation call budget");
     error.code = "call-budget-violation";
     throw error;
   }
@@ -537,9 +546,10 @@ async function runChain({
     runDir,
     manifest,
     writeManifest,
+    maxModelCalls,
   });
-  if (!shouldContinueAfterTurn(turn2)) {
-    const error = new Error("turn 2 violated the one-call evaluation budget");
+  if (!shouldContinueAfterTurn(turn2, maxModelCalls)) {
+    const error = new Error("turn 2 violated the bounded evaluation call budget");
     error.code = "call-budget-violation";
     throw error;
   }
@@ -572,7 +582,31 @@ async function runChain({
 }
 
 async function readScenario(file) {
-  return JSON.parse(await fs.readFile(file, "utf8"));
+  const wrapper = JSON.parse(await fs.readFile(file, "utf8"));
+  if (!isRecord(wrapper) || wrapper.sourceScenario === undefined) return wrapper;
+  if (typeof wrapper.sourceScenario !== "string" || !/^[^/\\]+\.json$/u.test(wrapper.sourceScenario)) {
+    throw new Error("scenario.sourceScenario must be a sibling JSON filename");
+  }
+  if (typeof wrapper.sourceScenarioSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(wrapper.sourceScenarioSha256)) {
+    throw new Error("scenario.sourceScenarioSha256 must be a SHA-256 hex digest");
+  }
+  const sourceFile = path.resolve(path.dirname(file), wrapper.sourceScenario);
+  const sourceBytes = await fs.readFile(sourceFile);
+  const sourceHash = crypto.createHash("sha256").update(sourceBytes).digest("hex");
+  if (sourceHash !== wrapper.sourceScenarioSha256) {
+    throw new Error(`source scenario hash mismatch: expected ${wrapper.sourceScenarioSha256}, received ${sourceHash}`);
+  }
+  const source = JSON.parse(sourceBytes.toString("utf8"));
+  return {
+    ...source,
+    experiment: wrapper.experiment,
+    model: wrapper.model,
+    piThinking: wrapper.piThinking,
+    callsPerTurn: wrapper.callsPerTurn,
+    automaticRetries: wrapper.automaticRetries,
+    sourceScenario: sourceFile,
+    sourceScenarioSha256: sourceHash,
+  };
 }
 
 async function main() {
@@ -600,7 +634,8 @@ async function main() {
   }
   await ensureOutputDirectory(output);
   process.env.WORKSPACE_ROOT = path.join(output, "live-workspaces");
-  process.env.PI_MAX_ATTEMPTS = "1";
+  const callsPerTurn = scenario.callsPerTurn ?? 1;
+  process.env.PI_MAX_ATTEMPTS = String(callsPerTurn);
 
   const startedAt = new Date().toISOString();
   const manifest = {
@@ -609,12 +644,13 @@ async function main() {
     runtime,
     model: runtimeModel,
     piThinking: scenario.piThinking,
-    maxAttempts: 1,
+    maxAttempts: callsPerTurn,
+    callsPerTurn,
     automaticRetries: 0,
     repeatsPerArm: scenario.repeatsPerArm,
     caseCount: scenario.cases.length,
     chainCount: scenario.cases.length * scenario.repeatsPerArm * scenario.arms.length,
-    plannedCalls: scenario.cases.length * scenario.repeatsPerArm * scenario.arms.length * 2,
+    maximumPlannedCalls: scenario.cases.length * scenario.repeatsPerArm * scenario.arms.length * 2 * callsPerTurn,
     modelCallRequests: 0,
     modelCalls: 0,
     completedTurnRuns: 0,
@@ -632,7 +668,8 @@ async function main() {
     model: runtimeModel,
     piThinking: "xhigh",
     productThinkingLabel: "max",
-    maxAttempts: 1,
+    maxAttempts: callsPerTurn,
+    callsPerTurn,
     automaticRetries: 0,
     armModes: {
       static: "experimentalFactLedger receives the unchanged initial card on both turns",
@@ -661,6 +698,7 @@ async function main() {
             initialLedger,
             manifest,
             writeManifest,
+            maxModelCalls: callsPerTurn,
           });
           const pair = pairRecords.get(pairKey) ?? [];
           pair.push(result);
@@ -724,4 +762,5 @@ module.exports = {
   ensureOutputDirectory,
   appendFixtureHistory,
   runOneTurn,
+  readScenario,
 };

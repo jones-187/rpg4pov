@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import {
   buildReviewPacket,
   ensureOutputDirectory,
+  readScenario,
   shouldContinueAfterTurn,
   validateScenario,
 } from "../../scripts/continuity-maintenance-ab-eval.cjs";
@@ -56,6 +57,19 @@ describe("continuity-maintenance-ab-eval", () => {
     expect(shouldContinueAfterTurn({ modelCallRequests: 0, modelCalls: 0 })).toBe(false);
     expect(shouldContinueAfterTurn({ modelCallRequests: 2, modelCalls: 1 })).toBe(false);
     expect(shouldContinueAfterTurn({ modelCallRequests: 2, modelCalls: 2 })).toBe(false);
+    expect(shouldContinueAfterTurn({ modelCallRequests: 2, modelCalls: 2 }, 2)).toBe(true);
+  });
+
+  it("loads the hash-pinned GLM wrapper without copying the frozen cases", async () => {
+    const wrapper = path.join(
+      process.cwd(),
+      "docs/acceptance/scenarios/continuity-maintenance-glm53-flash-full-ab.json",
+    );
+    const loaded = await readScenario(wrapper);
+    expect(loaded.model).toBe("glm-5.3-flash");
+    expect(loaded.callsPerTurn).toBe(2);
+    expect(loaded.cases).toEqual(scenarioFixture.cases);
+    expect(() => validateScenario(loaded)).not.toThrow();
   });
 
   it("builds an arm-blind packet while retaining each chain's own first-turn history", () => {
