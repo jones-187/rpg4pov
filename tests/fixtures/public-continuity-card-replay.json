@@ -1,0 +1,114 @@
+{
+  "current": {
+    "version": "1",
+    "events": [
+      {
+        "id": "public-e1",
+        "text": "主角在主楼东门公开宣布寻找旧档案馆钥匙。",
+        "source": "player",
+        "time": "次日午钟",
+        "location": "主楼东门",
+        "witnesses": ["主角", "白临"],
+        "visibility": "public",
+        "causedBy": []
+      },
+      {
+        "id": "public-e2",
+        "text": "白临回应将在午钟后同行。",
+        "source": "player",
+        "time": "次日午钟",
+        "location": "主楼东门",
+        "witnesses": ["主角", "白临"],
+        "visibility": "public",
+        "causedBy": ["public-e1"]
+      },
+      {
+        "id": "private-e1",
+        "text": "主角独自发现钥匙藏在东廊蓝蜡纸下。",
+        "source": "player",
+        "time": "次日午钟后",
+        "location": "旧档案馆东廊",
+        "witnesses": ["主角"],
+        "visibility": "private",
+        "causedBy": []
+      },
+      {
+        "id": "derived-e1",
+        "text": "白临仍不知道钥匙的位置。",
+        "source": "system",
+        "time": "次日午钟后",
+        "location": "旧档案馆东廊",
+        "witnesses": [],
+        "visibility": "public",
+        "causedBy": ["private-e1"]
+      },
+      {
+        "id": "open-e1",
+        "kind": "open-decision",
+        "text": "钥匙是否会被公开取回仍未决定。",
+        "source": "system",
+        "time": "次日午钟后",
+        "location": "旧档案馆东廊",
+        "witnesses": ["主角", "白临"],
+        "visibility": "public",
+        "causedBy": ["public-e2"]
+      }
+    ],
+    "knowledgeBoundaries": [
+      {
+        "id": "kb-open",
+        "holders": ["主角"]
+      }
+    ]
+  },
+  "updates": [
+    {
+      "version": "1",
+      "appendEvents": [
+        {
+          "id": "public-e3",
+          "text": "主角和白临公开抵达旧档案馆东廊。",
+          "source": "player",
+          "time": "次日午钟后",
+          "location": "旧档案馆东廊",
+          "witnesses": ["主角", "白临"],
+          "visibility": "public",
+          "causedBy": ["public-e1", "public-e2"]
+        }
+      ],
+      "upsertKnowledgeBoundaries": [
+        {
+          "id": "kb-open",
+          "holders": ["主角", "白临"]
+        }
+      ],
+      "resolve": [],
+      "retireIds": ["derived-e1"]
+    },
+    {
+      "version": "1",
+      "appendEvents": [
+        {
+          "id": "public-e4",
+          "text": "主角公开取回蓝蜡纸下的钥匙。",
+          "source": "player",
+          "time": "次日午钟后",
+          "location": "旧档案馆东廊",
+          "witnesses": ["主角", "白临"],
+          "visibility": "public",
+          "causedBy": ["public-e2", "public-e3"]
+        }
+      ],
+      "upsertKnowledgeBoundaries": [],
+      "resolve": [{ "id": "open-e1", "evidenceIds": ["public-e4"] }],
+      "retireIds": ["private-e1", "kb-open"]
+    }
+  ],
+  "invalidUpdate": {
+    "version": "1",
+    "appendEvents": [],
+    "upsertKnowledgeBoundaries": [],
+    "resolve": [],
+    "retireIds": ["public-e2"]
+  }
+}
