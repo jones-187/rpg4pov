@@ -716,4 +716,6 @@ module.exports = {
   shouldContinueAfterTurn,
   buildReviewPacket,
   ensureOutputDirectory,
+  appendFixtureHistory,
+  runOneTurn,
 };
