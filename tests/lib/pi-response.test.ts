@@ -209,6 +209,48 @@ describe("parseTurnResponse", () => {
     expect(() => parseTurnResponse(textResponse({ interaction: { mode: "decision", suggestions: ["a", "b", "c", "d", "e"] } }))).toThrow();
   });
 
+  it("禁用连续性卡片时必须保持旧四字段 schema", () => {
+    const update = {
+      version: "1",
+      appendEvents: [],
+      upsertKnowledgeBoundaries: [],
+      resolve: [],
+      retireIds: [],
+    };
+
+    expect(() => parseTurnResponse(textResponse(turnResponse()), {
+      factLedgerUpdate: "forbidden",
+    })).not.toThrow();
+    expect(() => parseTurnResponse(textResponse(turnResponse({ factLedgerUpdate: update })), {
+      factLedgerUpdate: "forbidden",
+    })).toThrow();
+    expect(() => parseTurnResponse(textResponse(), {
+      factLedgerUpdate: "required",
+    })).toThrow();
+  });
+
+  it("启用连续性卡片时要求并原样保留 factLedgerUpdate", () => {
+    const update = {
+      version: "1",
+      appendEvents: [],
+      upsertKnowledgeBoundaries: [],
+      resolve: [],
+      retireIds: [],
+    };
+    const parsed = parseTurnResponse(
+      textResponse(turnResponse({ factLedgerUpdate: update })),
+      { factLedgerUpdate: "required" },
+    );
+
+    expect(parsed).toEqual({
+      kind: "turn",
+      output: TURN_OUTPUT,
+      interaction: TURN_INTERACTION,
+      stateUpdate: TURN_STATE_UPDATE,
+      factLedgerUpdate: update,
+    });
+  });
+
   it("校验 turn 输出、状态更新和 roll 数量边界", () => {
     expect(() => parseTurnResponse(textResponse({ output: "没有标题" }))).toThrow();
     expect(() => parseTurnResponse(textResponse({ output: "# 主角视窗\n\n" }))).toThrow();

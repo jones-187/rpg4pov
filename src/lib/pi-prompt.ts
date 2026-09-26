@@ -60,6 +60,24 @@ file 必须逐字复制上下文中已有的文件标题；禁止翻译、改名
 四个字段缺一不可，不得增加字段、解释、代码文件或收尾句。字符串中的换行使用JSON转义\\n；不是在JSON外直接写小说。output 首行必须是 # 主角视窗，按指定POV写限知叙事；普通接话简短，重要情绪场景给足对话和心理空间，不固定300字截断。停在有效变化或应交还玩家处。
 禁止修改 story.md、turns/**、turn/input.md；不得把God State真相、NPC hiddenIntent、内部日志、随机数值或申报写入output或建议。`;
 
+/** Continuity-card mode adds one field and its exact update contract. */
+export function resolveTurnSystemPrompt(publicContinuityCard: boolean): string {
+  if (!publicContinuityCard) return PI_TURN_SYSTEM_PROMPT;
+
+  return PI_TURN_SYSTEM_PROMPT
+    .replace(
+      '{"kind":"turn","output":"# 主角视窗\\\\n\\\\n限知叙事正文","interaction":{"mode":"continue","suggestions":[]},"stateUpdate":{"sections":[],"rolls":[]}}',
+      '{"kind":"turn","output":"# 主角视窗\\\\n\\\\n限知叙事正文","interaction":{"mode":"continue","suggestions":[]},"stateUpdate":{"sections":[],"rolls":[]},"factLedgerUpdate":{"version":"1","appendEvents":[],"upsertKnowledgeBoundaries":[],"resolve":[],"retireIds":[]}}',
+    )
+    .replace(
+      '四个字段缺一不可，不得增加字段、解释、代码文件或收尾句。',
+      '五个字段缺一不可，不得增加字段、解释、代码文件或收尾句。',
+    ) + `
+
+## 公开连续性卡片维护
+factLedgerUpdate 固定为 {"version":"1","appendEvents":[],"upsertKnowledgeBoundaries":[],"resolve":[],"retireIds":[]}。appendEvents 追加本回合公开事件，事件 kind 只能是 event、unknown-cause 或 open-decision；upsertKnowledgeBoundaries 新建或更新抽象知情边界；resolve 只能处理 unknown-cause/open-decision，且 evidenceIds 必须引用最终仍保留的公开事件；retireIds 只能清理普通事件或知情边界。没有变化时全部给空数组。不得追加 private 事件，不得凭空推断证据、截止日期、默认后果或玩家未确认的重大决定。`;
+}
+
 /** Experimental planner shares behavior rules, but emits a scene contract, not prose. */
 export const PI_SCENE_PLAN_SYSTEM_PROMPT = PI_TURN_SYSTEM_PROMPT.split("## 完整响应")[0] + `
 ## 本实验路径的产物（只回复一个完整 JSON，不调用工具）
@@ -112,6 +130,7 @@ export async function buildTurnUserPrompt(
   storyId: string,
   playerInput: string,
   experimentalFactLedger?: FactLedger,
+  requireFactLedgerUpdate = false,
 ): Promise<string> {
   const parts: string[] = [];
   parts.push("执行本回合。以下为已预注入的 workspace 状态（禁止读取文件）：\n");
@@ -151,6 +170,9 @@ export async function buildTurnUserPrompt(
       "本段只约束关键事实、时间、地点、知情范围与因果。它不替代人物动机、语气、自由叙事或玩家选择；正文仍按 system 契约和当前输入创作。若上下文出现冲突，不得改写账本；以账本约束关键事实。",
       "未明确给出的截止日期、名额/稀缺性、默认后果、不可逆影响均视为未知；角色可以询问，不能自行确定。玩家未明确决定的重大选择必须保持未决。",
     );
+    if (requireFactLedgerUpdate) {
+      parts.push("本回合必须在完整 turn 响应的 factLedgerUpdate 字段提交账本更新；没有变化也要提交全空数组，禁止直接修改账本文件。");
+    }
   }
 
   if (oversized.length > 0) {

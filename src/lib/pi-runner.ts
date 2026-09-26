@@ -8,11 +8,16 @@ import {
   PI_INIT_OPENING_SYSTEM_PROMPT,
   PI_TURN_SYSTEM_PROMPT,
   PI_SCENE_PLAN_SYSTEM_PROMPT,
+  resolveTurnSystemPrompt,
   buildInitConceptsUserPrompt,
   buildInitOpeningUserPrompt,
   buildTurnUserPrompt,
 } from "./pi-prompt";
-import type { FactLedger } from "./fact-ledger";
+import {
+  applyFactLedgerUpdate,
+  FACT_LEDGER_VERSION,
+  type FactLedger,
+} from "./fact-ledger";
 import { parseStateUpdate, applyStateUpdates } from "./state-update";
 import { applyInitWorkspaceBundle, parseInitWorkspaceBundle } from "./init-bundle";
 import {
@@ -23,7 +28,12 @@ import {
 import { recordPoolRoll, type RollChoiceRng } from "./random-tool";
 import { bindTurnRolls, bindingRollContext, validateBoundRolls, type BoundTurnRoll } from "./turn-rolls";
 import { sanitizeForLog } from "./diagnostics";
-import { TURN_OUTPUT_PLACEHOLDER, readRandomRollLines } from "./workspace";
+import {
+  TURN_OUTPUT_PLACEHOLDER,
+  readContinuityCard,
+  readRandomRollLines,
+  writeContinuityCard,
+} from "./workspace";
 import { validateTurnOutput } from "./turn-output";
 import { readTurnInteractionRawLine } from "./turn-interaction";
 import { sanitizeTurnInteraction } from "./interaction-schema";
@@ -415,6 +425,7 @@ export class PiRunner implements AgentRunner {
   private readonly rollRng?: RollChoiceRng;
   private readonly separateScene: boolean;
   private readonly experimentalFactLedger?: FactLedger;
+  private readonly publicContinuityCard: boolean;
 
   constructor(opts?: {
     spawnFn?: SpawnFn;
@@ -422,12 +433,17 @@ export class PiRunner implements AgentRunner {
     rollRng?: RollChoiceRng;
     experimentalSceneSeparation?: boolean;
     experimentalFactLedger?: FactLedger;
+    publicContinuityCard?: boolean;
   }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.piPath = opts?.piPath ?? process.env.PI_PATH?.trim() ?? DEFAULT_PI_PATH;
     this.rollRng = opts?.rollRng;
     this.separateScene = opts?.experimentalSceneSeparation ?? false;
     this.experimentalFactLedger = opts?.experimentalFactLedger;
+    this.publicContinuityCard = opts?.publicContinuityCard ?? false;
+    if (this.publicContinuityCard && (this.separateScene || this.experimentalFactLedger)) {
+      throw new Error("public continuity card cannot be combined with experimental fact ledger injection or scene separation");
+    }
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
@@ -463,11 +479,30 @@ export class PiRunner implements AgentRunner {
       };
     }
 
+    let currentLedger: FactLedger | null = null;
+    if (this.publicContinuityCard) {
+      try {
+        currentLedger = await readContinuityCard(req.storyId);
+      } catch (err) {
+        return {
+          success: false,
+          error: "public continuity card read failed",
+          detail: sanitizeForLog(err instanceof Error ? err.message : String(err)).slice(0, 2000),
+        };
+      }
+    }
+    const ledger = currentLedger ?? {
+      version: FACT_LEDGER_VERSION,
+      events: [],
+      knowledgeBoundaries: [],
+    };
+
     const userPrompt = await buildTurnUserPrompt(
       req.workspaceDir,
       req.storyId,
       req.playerInput,
-      this.experimentalFactLedger,
+      this.publicContinuityCard ? ledger : this.experimentalFactLedger,
+      this.publicContinuityCard,
     );
     let boundRolls: BoundTurnRoll[] | undefined;
 
@@ -487,7 +522,10 @@ export class PiRunner implements AgentRunner {
         req,
         spawnFn: this.spawnFn,
         piPath: this.piPath,
-        args: buildResponseArgs(this.separateScene ? PI_SCENE_PLAN_SYSTEM_PROMPT : PI_TURN_SYSTEM_PROMPT,
+        args: buildResponseArgs(
+          this.separateScene
+            ? PI_SCENE_PLAN_SYSTEM_PROMPT
+            : resolveTurnSystemPrompt(this.publicContinuityCard),
           [userPrompt, boundRolls ? bindingRollContext(boundRolls) : "", diagnostics.length ? `上次完整响应未通过，请修正：${diagnostics.at(-1)}` : ""].join("\n\n")),
         phase: this.separateScene ? "turn-plan" : "turn",
         allowedPaths: [],
@@ -556,7 +594,12 @@ export class PiRunner implements AgentRunner {
         continue;
       }
 
-      let candidate: { output: string; interaction: import("./interaction-schema").TurnInteraction; stateUpdate: string };
+      let candidate: {
+        output: string;
+        interaction: import("./interaction-schema").TurnInteraction;
+        stateUpdate: string;
+        factLedgerUpdate?: unknown;
+      };
       if (this.separateScene) {
         try {
           const scene = parseScenePlan(JSON.stringify(value));
@@ -591,30 +634,54 @@ export class PiRunner implements AgentRunner {
         }
       } else {
         try {
-          const parsed = parseTurnResponse(attemptResult.responseText);
+          const parsed = parseTurnResponse(attemptResult.responseText, {
+            factLedgerUpdate: this.publicContinuityCard ? "required" : "forbidden",
+          });
           if (parsed.kind !== "turn") throw new Error("expected complete turn");
           candidate = parsed;
         } catch (error) { diagnostics.push(`attempt ${attempt}: ${String(error)}`); continue; }
       }
 
       // Validate all candidate changes before committing any state or audit log.
+      let parsedState: ReturnType<typeof parseStateUpdate>;
+      let interactionRaw: string;
+      let nextLedger: FactLedger | undefined;
+      const raw = candidate.stateUpdate;
       try {
-        const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
-        const raw = candidate.stateUpdate;
-        const parsed = parseStateUpdate(raw);
-        if (parsed.problems.length) throw new Error(parsed.problems.join("; "));
-        validateBoundRolls(boundRolls ?? [], parsed.rolls);
-        const interactionRaw = JSON.stringify(candidate.interaction);
+        parsedState = parseStateUpdate(raw);
+        if (parsedState.problems.length) throw new Error(parsedState.problems.join("; "));
+        validateBoundRolls(boundRolls ?? [], parsedState.rolls);
+        interactionRaw = JSON.stringify(candidate.interaction);
         const problem = validateTurnOutput(candidate.output, await readRandomRollLines(req.storyId), [
           ...buildInteractionFingerprints(interactionRaw),
-          ...parsed.rolls.flatMap((roll) => [
+          ...parsedState.rolls.flatMap((roll) => [
             JSON.stringify(roll),
             `R${roll.index}: rollId=${roll.rollId} candidates=${roll.candidates.map((c) => `${c.id}:${c.weight}`).join(",")} → ${roll.declaredSelectedId}`,
           ]),
           ...raw.split("\n").map((line) => line.trim()).filter((line) => /^R\d+:/.test(line)),
         ]);
         if (problem) throw new Error(problem);
-        const applied = await applyStateUpdates(req.workspaceDir, parsed.sections);
+      } catch (err) {
+        return {
+          success: false,
+          error: "turn candidate validation or commit failed",
+          detail: sanitizeForLog(String(err)).slice(0, 2000),
+        };
+      }
+      if (this.publicContinuityCard) {
+        try {
+          nextLedger = applyFactLedgerUpdate(ledger, candidate.factLedgerUpdate);
+        } catch (err) {
+        diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(String(err)).slice(0, 2000)}`);
+        continue;
+        }
+      }
+
+      // From this point onward an I/O failure may follow partial writes, so it
+      // must return to the orchestrator for whole-workspace rollback.
+      try {
+        const stateUpdatePath = path.join(req.workspaceDir, "turn", "state-update.md");
+        const applied = await applyStateUpdates(req.workspaceDir, parsedState.sections);
         if (applied.errors.length) {
           // Returned validation errors guarantee zero writes. Only this case
           // may regenerate against the same state and frozen random outcomes.
@@ -628,6 +695,9 @@ export class PiRunner implements AgentRunner {
         await fs.writeFile(stateUpdatePath, raw);
         await fs.writeFile(path.join(req.workspaceDir, "turn/output.md"), candidate.output);
         await fs.writeFile(path.join(req.workspaceDir, "turn/interaction.json"), interactionRaw);
+        if (this.publicContinuityCard && nextLedger) {
+          await writeContinuityCard(req.storyId, nextLedger);
+        }
         for (const roll of boundRolls ?? []) {
           await recordPoolRoll({ storyId: req.storyId, workspaceDir: req.workspaceDir, ...roll, declaredSelectedId: roll.selectedId });
         }

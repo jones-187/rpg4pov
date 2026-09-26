@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { parseFactLedger, type FactLedger } from "./fact-ledger";
 
 const STORY_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_TITLE = "未命名故事";
@@ -148,6 +149,47 @@ export async function readTurnInputRaw(storyId: string): Promise<string | null> 
  * 定义在 workspace（random-tool 单向依赖 workspace，反向会成环）；random-tool re-export。
  */
 export const RANDOM_ROLLS_LOG = "random-rolls.jsonl";
+/** Canonical Public Continuity Card at the Story Workspace root. */
+export const CONTINUITY_CARD_FILE = "continuity-card.json";
+
+/**
+ * Read the canonical continuity card. Missing returns null so only the enabled
+ * turn path can decide to start from an empty card; malformed data throws.
+ */
+export async function readContinuityCard(storyId: string): Promise<FactLedger | null> {
+  if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
+  let raw: string;
+  try {
+    raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(storyId), CONTINUITY_CARD_FILE),
+      "utf8",
+    );
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("continuity card is not valid JSON");
+  }
+  return parseFactLedger(parsed);
+}
+
+/** Serialize after strict validation; the caller never persists a prototype. */
+export async function writeContinuityCard(
+  storyId: string,
+  ledger: FactLedger,
+): Promise<void> {
+  if (!isValidStoryId(storyId)) throw new Error("invalid storyId");
+  const validated = parseFactLedger(ledger);
+  await fs.writeFile(
+    path.join(resolveWorkspaceDir(storyId), CONTINUITY_CARD_FILE),
+    JSON.stringify(validated, null, 2) + "\n",
+  );
+}
 
 /**
  * 读取随机判定日志的原始行（Issue 9）。

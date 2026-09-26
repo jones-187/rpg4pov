@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
+  CONTINUITY_CARD_FILE,
   createStory,
   listStories,
   getStory,
@@ -11,13 +12,18 @@ import {
   readTurnOutput,
   readRandomRollLines,
   readTurnDone,
+  readContinuityCard,
   clearTurnDone,
   writeTurnInput,
   resolveWorkspaceDir,
   resolveWorkspaceRoot,
   resolveSnapshotsRoot,
+  writeContinuityCard,
 } from "@/lib/workspace";
+import { parseFactLedger } from "@/lib/fact-ledger";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
+import { FakeAgentRunner } from "@/lib/fake-agent-runner";
+import { TurnOrchestrator } from "@/lib/turn-orchestrator";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -298,5 +304,53 @@ describe("workspace adjustments/tendencies placeholders (Issue 9.5)", () => {
     expect(adjustments).toContain("（空");
     expect(tendencies).toContain("Inferred Tendencies");
     expect(tendencies).toContain("（空");
+  });
+});
+
+describe("continuity card persistence", () => {
+  it("missing canonical card reads as null and disabled fake turns do not create it", async () => {
+    const meta = await createStory();
+    const workspace = resolveWorkspaceDir(meta.storyId);
+
+    await expect(readContinuityCard(meta.storyId)).resolves.toBeNull();
+    await new TurnOrchestrator(new FakeAgentRunner()).executeTurn(meta.storyId, "推门");
+    await expect(fs.access(path.join(workspace, CONTINUITY_CARD_FILE))).rejects.toThrow();
+  });
+
+  it("writes only a serialized validated ledger", async () => {
+    const meta = await createStory();
+    const ledger = parseFactLedger({
+      version: "1",
+      events: [{
+        id: "e1",
+        kind: "event",
+        text: "北门上锁。",
+        source: "system",
+        time: "第三夜",
+        location: "北门",
+        witnesses: ["主角"],
+        visibility: "public",
+        causedBy: [],
+      }],
+      knowledgeBoundaries: [],
+    });
+
+    await writeContinuityCard(meta.storyId, ledger);
+    const raw = await fs.readFile(
+      path.join(resolveWorkspaceDir(meta.storyId), CONTINUITY_CARD_FILE),
+      "utf8",
+    );
+    expect(raw).toBe(JSON.stringify(ledger, null, 2) + "\n");
+    await expect(readContinuityCard(meta.storyId)).resolves.toEqual(ledger);
+  });
+
+  it("fails closed on malformed canonical card", async () => {
+    const meta = await createStory();
+    const file = path.join(resolveWorkspaceDir(meta.storyId), CONTINUITY_CARD_FILE);
+
+    await fs.writeFile(file, "{bad json");
+    await expect(readContinuityCard(meta.storyId)).rejects.toThrow(/not valid JSON/);
+    await fs.writeFile(file, JSON.stringify({ version: "1", events: [{}] }));
+    await expect(readContinuityCard(meta.storyId)).rejects.toThrow(/fact ledger/);
   });
 });

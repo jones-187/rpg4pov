@@ -33,11 +33,15 @@ class TaskDispatchRunner implements AgentRunner {
 }
 
 export function resolveRunner(): AgentRunner {
+  const publicContinuityCard = process.env.PUBLIC_CONTINUITY_CARD === "1";
   if (process.env.AGENT_RUNNER === "pi") {
-    return new PiRunner();
+    return new PiRunner({ publicContinuityCard });
   }
   if (process.env.AGENT_RUNNER === "claude") {
-    return new TaskDispatchRunner(new PiRunner(), new ClaudeCodeRunner());
+    return new TaskDispatchRunner(
+      new PiRunner({ publicContinuityCard }),
+      new ClaudeCodeRunner(),
+    );
   }
   return new FakeAgentRunner();
 }

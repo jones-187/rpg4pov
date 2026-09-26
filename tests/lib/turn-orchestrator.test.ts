@@ -188,6 +188,33 @@ describe("TurnOrchestrator", () => {
     await expect(fs.access(path.join(wsDir, "actors", "half-baked-npc.md"))).rejects.toThrow();
   });
 
+  it("rollback removes a continuity card created by a turn that later fails validation", async () => {
+    const meta = await createStory();
+    const wsDir = path.join(root, meta.storyId);
+    const cardPath = path.join(wsDir, "continuity-card.json");
+
+    class CardThenBadOutputRunner implements AgentRunner {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        await fs.writeFile(cardPath, JSON.stringify({
+          version: "1",
+          events: [],
+          knowledgeBoundaries: [],
+        }));
+        await fs.writeFile(path.join(req.workspaceDir, "turn", "output.md"), "非法正文");
+        await fs.writeFile(path.join(req.workspaceDir, "turn", "done.json"), JSON.stringify({
+          status: "success",
+          completedAt: new Date().toISOString(),
+        }));
+        return { success: true };
+      }
+    }
+
+    const outcome = await new TurnOrchestrator(new CardThenBadOutputRunner())
+      .executeTurn(meta.storyId, "测试回滚");
+    expect(outcome.success).toBe(false);
+    await expect(fs.access(cardPath)).rejects.toThrow();
+  });
+
   it("timeout: hanging runner is aborted, turn fails with timeout reason", async () => {
     const meta = await createStory();
     // 用极短超时，避免测试等待

@@ -16,6 +16,11 @@ export type PiTurnResponse = {
   output: string;
   interaction: TurnInteraction;
   stateUpdate: string;
+  /**
+   * Present only in the enabled continuity-card mode. The parser preserves the
+   * unknown candidate verbatim; semantic validation belongs to the ledger module.
+   */
+  factLedgerUpdate?: unknown;
 };
 
 export type PiRollRequestResponse = {
@@ -24,6 +29,10 @@ export type PiRollRequestResponse = {
 };
 
 export type PiTurnResponseValue = PiTurnResponse | PiRollRequestResponse;
+
+export interface TurnResponseParserOptions {
+  factLedgerUpdate: "required" | "forbidden";
+}
 
 export type { TurnInteraction } from "./interaction-schema";
 
@@ -139,8 +148,14 @@ export function parseResponseStateUpdate(value: unknown): string {
   return serialized;
 }
 
-function parseTurn(value: UnknownRecord): PiTurnResponse {
-  if (!hasExactlyKeys(value, ["kind", "output", "interaction", "stateUpdate"])) {
+function parseTurn(
+  value: UnknownRecord,
+  options: TurnResponseParserOptions,
+): PiTurnResponse {
+  const requiredKeys = options.factLedgerUpdate === "required"
+    ? ["kind", "output", "interaction", "stateUpdate", "factLedgerUpdate"]
+    : ["kind", "output", "interaction", "stateUpdate"];
+  if (!hasExactlyKeys(value, requiredKeys)) {
     fail("turn response keys are invalid");
   }
   if (value.kind !== "turn") fail("response kind is invalid");
@@ -148,12 +163,16 @@ function parseTurn(value: UnknownRecord): PiTurnResponse {
 
   const stateUpdate = parseResponseStateUpdate(value.stateUpdate);
 
-  return {
+  const response: PiTurnResponse = {
     kind: "turn",
     output,
     interaction: parseResponseInteraction(value.interaction),
     stateUpdate,
   };
+  if (options.factLedgerUpdate === "required") {
+    response.factLedgerUpdate = value.factLedgerUpdate;
+  }
+  return response;
 }
 
 function parseRollRequest(value: UnknownRecord): PiRollRequestResponse {
@@ -168,13 +187,19 @@ function parseRollRequest(value: UnknownRecord): PiRollRequestResponse {
   return { kind: "roll-request", rolls: [...value.rolls] };
 }
 
-/** Parse and strictly validate the complete model response envelope. */
-export function parseTurnResponse(raw: string): PiTurnResponseValue {
+/**
+ * Parse and strictly validate the complete model response envelope. Continuity
+ * updates are opt-in so the legacy turn schema remains exact by default.
+ */
+export function parseTurnResponse(
+  raw: string,
+  options: TurnResponseParserOptions = { factLedgerUpdate: "forbidden" },
+): PiTurnResponseValue {
   const parsed = parseResponseJson(raw);
   if (!isRecord(parsed) || typeof parsed.kind !== "string") {
     fail("response must be a JSON object with a kind");
   }
-  if (parsed.kind === "turn") return parseTurn(parsed);
+  if (parsed.kind === "turn") return parseTurn(parsed, options);
   if (parsed.kind === "roll-request") return parseRollRequest(parsed);
   fail("response kind is unknown");
 }

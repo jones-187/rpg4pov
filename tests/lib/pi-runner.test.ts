@@ -87,6 +87,23 @@ const TURN_RESPONSE = {
   interaction: { mode: "continue", suggestions: [] },
   stateUpdate: { sections: [], rolls: [] },
 };
+const LEDGER_UPDATE = {
+  version: "1",
+  appendEvents: [{
+    id: "card-e1",
+    kind: "event",
+    text: "主角在灯房看见守塔人添油。",
+    source: "model",
+    time: "第一夜",
+    location: "灯房",
+    witnesses: ["主角", "守塔人"],
+    visibility: "public",
+    causedBy: [],
+  }],
+  upsertKnowledgeBoundaries: [],
+  resolve: [],
+  retireIds: [],
+};
 const STATE_UPDATE_MD = [
   "=== FILE: world.md ===",
   "APPEND: ## 时间线",
@@ -224,8 +241,71 @@ describe("PiRunner", () => {
     expect(baselineSpawn.calls[0].args.at(-1)).not.toContain("权威薄事实账本");
     expect(ledgerSpawn.calls[0].args.at(-1)).toContain("权威薄事实账本");
     expect(ledgerSpawn.calls[0].args.at(-1)).toContain("知识边界=");
+    expect(ledgerSpawn.calls[0].args.at(-1)).not.toContain("factLedgerUpdate 字段");
     expect(ledgerSpawn.calls[0].args.at(-1)).not.toContain("ledger-e1");
     expect(ledgerSpawn.calls[0].args.at(-1)).not.toContain("半张海图");
+  });
+
+  it("public continuity card reads, validates, persists, and injects the next card", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeResponseSpawn([{ value: { ...TURN_RESPONSE, factLedgerUpdate: LEDGER_UPDATE } }]);
+
+    const runner = new PiRunner({ spawnFn: spawn, publicContinuityCard: true });
+    const first = await runner.runTurn(turnRequest(meta.storyId, dir));
+    expect(first.success, first.detail).toBe(true);
+
+    const saved = await fs.readFile(path.join(dir, "continuity-card.json"), "utf8");
+    expect(saved).toContain("card-e1");
+    expect(saved).toContain("主角在灯房看见守塔人添油。");
+    expect(calls[0].args[calls[0].args.indexOf("--system-prompt") + 1]).toContain("五个字段缺一不可");
+    expect(calls[0].args.at(-1)).toContain("权威薄事实账本（只读）");
+    expect(calls[0].args.at(-1)).toContain("（无事件）");
+    expect(calls[0].args.at(-1)).toContain("factLedgerUpdate");
+
+    const secondSpawn = makeResponseSpawn([{
+      value: {
+        ...TURN_RESPONSE,
+        factLedgerUpdate: { ...LEDGER_UPDATE, appendEvents: [], retireIds: [] },
+      },
+    }]);
+    const second = await new PiRunner({
+      spawnFn: secondSpawn.spawn,
+      publicContinuityCard: true,
+    }).runTurn(turnRequest(meta.storyId, dir));
+    expect(second.success, second.detail).toBe(true);
+    expect(secondSpawn.calls[0].args.at(-1)).toContain("id=card-e1");
+    expect(secondSpawn.calls[0].args.at(-1)).toContain("text=主角在灯房看见守塔人添油。");
+  });
+
+  it("invalid public continuity update retries before writes, then persists no card", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const invalid = {
+      ...LEDGER_UPDATE,
+      appendEvents: [{ ...LEDGER_UPDATE.appendEvents[0], visibility: "private" }],
+    };
+    const { spawn, calls } = makeResponseSpawn([
+      { value: { ...TURN_RESPONSE, factLedgerUpdate: invalid } },
+      { value: { ...TURN_RESPONSE, factLedgerUpdate: invalid } },
+    ]);
+    process.env.PI_MAX_ATTEMPTS = "2";
+
+    const result = await new PiRunner({ spawnFn: spawn, publicContinuityCard: true })
+      .runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(false);
+    expect(calls).toHaveLength(2);
+    await expect(fs.access(path.join(dir, "continuity-card.json"))).rejects.toThrow();
+    await expect(fs.readFile(path.join(dir, "turn/output.md"), "utf8"))
+      .resolves.toContain("占位");
+  });
+
+  it("rejects combining public continuity card with scene separation", () => {
+    expect(() => new PiRunner({
+      experimentalSceneSeparation: true,
+      publicContinuityCard: true,
+    })).toThrow(/cannot be combined/);
   });
 
   it("keeps a bound outcome across response retries without drawing again", async () => {

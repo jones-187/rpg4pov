@@ -10,7 +10,7 @@ applyFactLedgerUpdate(current: FactLedger, candidate: unknown): FactLedger
 
 ## 候选格式
 
-candidate 固定为以下四个字段，缺少字段或出现额外字段都拒绝：
+candidate 固定为以下五个字段，缺少字段或出现额外字段都拒绝：
 
 ```json
 {
@@ -39,6 +39,8 @@ candidate 固定为以下四个字段，缺少字段或出现额外字段都拒�
 
 ## 当前边界
 
-该接口尚未接入模型响应 schema、正式回合流程或文件持久化；没有生产调用方，也没有自动候选来源。现有冻结 A/B scenario 和缺省 `knowledgeBoundaries` 字段的旧 JSON 仍可解析。
+该接口已通过默认关闭的 `PUBLIC_CONTINUITY_CARD=1` 实验开关接入 Pi 正式回合。启用后，服务端从工作区根目录 `continuity-card.json` 读取权威卡片；文件缺失时仅在内存中使用空卡片，格式损坏则整轮失败，绝不静默重置。模型完整响应必须额外提交 `factLedgerUpdate`，但不能直接写权威文件。服务端在任何写盘前校验正文、交互、状态更新和卡片更新，随后在现有 TurnOrchestrator 快照窗口内统一提交；后续任一步失败均整轮回滚。
 
-下一步是先决定候选来源，包括公开事件、未决项解决/退役和 boundary 更新如何从正式回合产生，再将该接口接入原子回合提交。接口本身已经冻结为可回放的纯函数；`tests/fixtures/public-continuity-card-replay.json` 是当前生命周期回放基准。
+现有冻结 A/B scenario 和缺省 `knowledgeBoundaries` 字段的旧 JSON 仍可解析；旧四字段 Pi 响应在开关关闭时保持严格不变。场景分离实验暂不与本功能混用。
+
+下一步不是继续增加规则，而是用真实模型对启用/禁用两臂各重复三轮，分别评价格式成功率、因果连续性、角色知情边界、未决事项处理和文学体验。只有实测达到门槛后才能考虑默认开启。
