@@ -78,7 +78,7 @@ DeepSeek 隔离连续10回合随后启动，但按规则在正式第5回合首�
 - [x] 情感和记忆契约恢复（提示词规则已恢复；待质量验证）
 - [x] 限知叙事比较原型与 `--separated` 验收入口
 - [x] 公开连续性卡片冻结输入 A/B（语义门达到，技术总门未过；保持实验）
-- [ ] 公开连续性卡片自动维护（生命周期引擎、Pi 候选来源和快照内原子持久化已实现，`PUBLIC_CONTINUITY_CARD=1` 默认关闭；首轮36调用因子项 schema 提示不完整导致 maintained 仅2/18技术通过，已补全精确 schema，待独立 Round 2，详见[`acceptance/2026-09-26-continuity-maintenance-ab-result.md`](acceptance/2026-09-26-continuity-maintenance-ab-result.md)）
+- [ ] 公开连续性卡片自动维护（生命周期引擎、Pi 候选来源和快照内原子持久化已实现，`PUBLIC_CONTINUITY_CARD=1` 默认关闭；Round 2 共36次真实调用，maintained 技术17/18、7个可比配对胜6个，但9张维护卡中1张把NPC陈述误标为玩家来源，触发硬语义否决，暂不晋级。架构方向成立，下一步冻结代码并用同一基准比较更强模型，不增加DeepSeek语义兜底。详见[`acceptance/2026-09-26-continuity-maintenance-ab-round2-result.md`](acceptance/2026-09-26-continuity-maintenance-ab-round2-result.md)）
 - [ ] 真实长局验收（2026-09-20 已获授权；真实小样本未过门槛，停止长局，详见 `acceptance/2026-09-20-real-pilot.md`）
 
 ## 真实验收后调整优先级（2026-09-20）
