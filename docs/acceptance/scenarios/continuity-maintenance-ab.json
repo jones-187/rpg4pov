@@ -1,0 +1,203 @@
+{
+  "experiment": "public-continuity-card-maintenance-ab",
+  "model": "deepseek-v4.1-flash",
+  "piThinking": "xhigh",
+  "repeatsPerArm": 3,
+  "automaticRetries": 0,
+  "arms": ["static", "maintained"],
+  "order": [
+    ["static", "maintained"],
+    ["maintained", "static"],
+    ["static", "maintained"]
+  ],
+  "cases": [
+    {
+      "id": "private-knowledge-boundary",
+      "dimension": "privacy-and-knowledge",
+      "title": "药圃铜钥匙",
+      "fixture": {
+        "world": "# 世界\n\n谷雨后清晨，南院药圃。木柜底格有一把能打开温室侧门的铜钥匙；主角独自确认过它的位置。邱砚在药圃外整理账目，没有看见钥匙，也不知道它的用途。",
+        "player": "# 主角\n\n我是药圃记录员，第一人称限知叙事。未公开的信息只有在我明确说出后才可以被其他人知道。\n\n## Public Scene\n```json\n{\"time\":\"谷雨后清晨\",\"location\":\"南院药圃\",\"narrativeVoice\":\"第一人称，克制而具体\",\"knownFacts\":[\"主角独自确认木柜底格的铜钥匙\",\"邱砚没有看见钥匙\"],\"visibleActors\":[{\"name\":\"邱砚\",\"appearance\":\"浅色围裙，袖口沾着药末\",\"voice\":\"平静，喜欢逐条核对\"}]}\n```\n\n## Player Agency\n不得替我透露铜钥匙、木柜底格或温室侧门的关系。",
+        "actorFile": "邱砚.md",
+        "actor": "# 邱砚\n\n## 表面信息\n药圃账目员，负责核对出入记录；没有看见木柜底格，也不知道铜钥匙的用途。\n\n## Emotional Core\n- coreNeed：账目清楚。\n- coreFear：物件失踪。\n- vulnerability：早班记录有一行空缺。\n- defensivePattern：先核对可见记录。\n- approachPattern：如实回答见闻。\n- retreatPattern：不猜测、不搜查私物。\n\n## Relationship State\n- surfaceRelationship：同事。\n- privateMeaning：主角今天较安静。\n- desiredPosition：按流程办事。\n- perceivedPosition：中立。\n- approachImpulse：确认是否有陌生人进出。\n- avoidanceImpulse：不越过药圃边界。\n- unresolvedQuestion：早班记录为何缺一行。\n- currentTension：低。\n- recentEvidence：账目有空缺。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：专注。\n- emotionalTrigger：主角询问早班情况。\n- emotionalConflict：想核对 vs 不想越界。\n- immediateGoal：回答自己看见的事。\n- hiddenIntent：避免账目责任。\n- restraint：不追问私物。\n- behaviorStrategy：回答见闻后等待。\n- voice：平稳、短句。",
+        "opening": "# 主角视窗\n\n药圃外的露水还没散。邱砚合上账册，问我早班的门禁记录有没有异常。",
+        "priorHistory": [
+          {
+            "turnId": "private-boundary-prior-1",
+            "at": "2026-09-26T09:00:00.000Z",
+            "input": "我提前到药圃。",
+            "output": "# 主角视窗\n\n我在木柜底格确认了铜钥匙的位置，随后原样放回。邱砚仍在药圃外，没有看见这个动作。"
+          }
+        ]
+      },
+      "turn1Input": "我不提钥匙，也不说木柜。我只回答：\"门禁记录我没看见异常；你那边有没有看见陌生人进药圃？\"",
+      "turn2Input": "我仍不提铜钥匙、木柜或温室侧门，只追问早班记录缺漏的那一行：\"你亲眼看见谁进出过药圃？\"",
+      "initialLedger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "hp-actor-unaware",
+            "kind": "event",
+            "text": "邱砚没有看见主角查看木柜底格。",
+            "source": "system",
+            "time": "谷雨后清晨",
+            "location": "南院药圃",
+            "witnesses": [],
+            "visibility": "public",
+            "causedBy": []
+          }
+        ],
+        "knowledgeBoundaries": [
+          {"id": "hp-private-boundary", "holders": ["主角"]}
+        ]
+      },
+      "maintenanceChecklist": [
+        "新增事实都能在冻结历史、玩家输入或本回合玩家可见结果中找到依据",
+        "更新没有把私密钥匙正文复制成新的公开事件，也没有扩大知情者范围",
+        "没有把邱砚未看见钥匙改成他已经知道或猜中钥匙用途",
+        "不以无关或推测内容解决、退役仍有效的事实"
+      ],
+      "turn2Checklist": [
+        "邱砚只谈自己亲眼见到或记录中确有的出入情况",
+        "正文没有透露钥匙、木柜底格或温室侧门用途",
+        "主角仍在追问记录缺漏，没有被替换成其他行动",
+        "没有机械复述整张卡片或重复上一回合正文"
+      ]
+    },
+    {
+      "id": "open-player-decision",
+      "dimension": "player-agency-and-unknown-rules",
+      "title": "灯塔轮值",
+      "fixture": {
+        "world": "# 世界\n\n立冬前一周，港务学习室。主角收到内陆冬季培训与岛站灯塔轮值两份任命；安排时间重叠且互斥，只有主角签名才生效。现有文件没有写明签名截止日期，也没有说明未签署的默认后果。主角尚未签名或口头选择。",
+        "player": "# 主角\n\n我是海务学员，第一人称限知叙事。年度安排由我决定；没有写明的期限和未签后果不能自行补全。\n\n## Public Scene\n```json\n{\"time\":\"立冬前一周\",\"location\":\"港务学习室\",\"narrativeVoice\":\"第一人称，清醒而克制\",\"knownFacts\":[\"内陆培训与岛站轮值互斥\",\"两份文件均未签名\",\"现有文件未写明截止日期或默认后果\"],\"visibleActors\":[{\"name\":\"邵青\",\"appearance\":\"深蓝制服，手边放着两份任命夹\",\"voice\":\"清楚，不催促\"}]}\n```\n\n## Player Agency\n不得替我选择任命、签字、承诺，或把沉默当作决定。",
+        "actorFile": "邵青.md",
+        "actor": "# 邵青\n\n## 表面信息\n港务导师，负责说明任命文件；无权替主角签字。当前两份文件没有具体签名截止日期，也没有未签署的默认处分。\n\n## Emotional Core\n- coreNeed：程序合规。\n- coreFear：学员在信息不足时被迫决定。\n- vulnerability：任命名额有限，但当前没有名额被取消的通知。\n- defensivePattern：只说明文件已写明的规则。\n- approachPattern：回答具体问题。\n- retreatPattern：不替人判断。\n\n## Relationship State\n- surfaceRelationship：师生关系。\n- privateMeaning：主角需要时间权衡。\n- desiredPosition：可靠导师。\n- perceivedPosition：正式。\n- approachImpulse：说明两条任命的已知差别。\n- avoidanceImpulse：不制造期限或压力。\n- unresolvedQuestion：主角最终选择哪份任命。\n- currentTension：选择尚未作出。\n- recentEvidence：两份任命都未签。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：冷静。\n- emotionalTrigger：主角询问任命规则。\n- emotionalConflict：解释清楚 vs 尊重选择。\n- immediateGoal：区分文件明确内容与未知事项。\n- hiddenIntent：避免学员误解规则。\n- restraint：不催促、不代选。\n- behaviorStrategy：说明已知与未知，然后停下。\n- voice：清楚、简短。",
+        "opening": "# 主角视窗\n\n港务学习室里，两份任命夹并排放在桌上。邵青把笔留在自己一侧，问我是否要先核对文件规则。",
+        "priorHistory": [
+          {
+            "turnId": "open-decision-prior-1",
+            "at": "2026-09-26T09:00:00.000Z",
+            "input": "我说先不决定。",
+            "output": "# 主角视窗\n\n我把两份任命夹都留在桌上，没有拿笔。邵青说可以继续核对文件内容。"
+          }
+        ]
+      },
+      "turn1Input": "我不拿笔，也不承诺内陆或岛站。我只说：\"先把两份文件明确写出的条件、期限和未签后果逐项说明；没写明的也请直接说未知。\"",
+      "turn2Input": "我仍未签名或选择。请把刚才确认的文件内容和仍然未知的事项分开复述；不要替我把未决定解释成默认选择。",
+      "initialLedger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "hd-appointments",
+            "kind": "event",
+            "text": "内陆培训与岛站灯塔轮值时间重叠且互斥。",
+            "source": "system",
+            "time": "立冬前一周",
+            "location": "港务学习室",
+            "witnesses": ["主角", "邵青"],
+            "visibility": "public",
+            "causedBy": []
+          },
+          {
+            "id": "hd-not-signed",
+            "kind": "open-decision",
+            "text": "主角尚未签署任何任命，也没有作出年度安排。",
+            "source": "player",
+            "time": "立冬前一周",
+            "location": "港务学习室",
+            "witnesses": ["主角", "邵青"],
+            "visibility": "public",
+            "causedBy": ["hd-appointments"]
+          }
+        ],
+        "knowledgeBoundaries": []
+      },
+      "maintenanceChecklist": [
+        "更新只记录玩家输入、冻结上下文和回合输出明确支持的事实",
+        "没有编造签名截止日期、名额即将取消或未签署的默认后果",
+        "主角尚未决定这一 open-decision 仍保留；没有无证据 resolve 或 retire",
+        "没有把询问、沉默或延迟转成玩家已作出的选择"
+      ],
+      "turn2Checklist": [
+        "邵青区分文件明确内容与未知事项，没有虚构期限或默认后果",
+        "两份任命和玩家选择仍保持未决，没有替玩家签名、承诺或代选",
+        "玩家可继续决定或询问，正文没有强迫进入结局",
+        "没有机械复述历史或连续性卡片"
+      ]
+    },
+    {
+      "id": "unknown-cause-evidence",
+      "dimension": "causal-continuity-and-evidence",
+      "title": "旧索道卡阻",
+      "fixture": {
+        "world": "# 世界\n\n雨停后傍晚，旧索道站滑轮发生卡阻。主角和沈回都没有看见卡阻发生过程；原因尚未查明。断电挂牌没有解除前，任何人不得进入检修桥。",
+        "player": "# 主角\n\n我是索道巡查学员，第一人称限知叙事。没有证据的原因必须继续未知，安全挂牌解除前不能进入检修桥。\n\n## Public Scene\n```json\n{\"time\":\"雨停后傍晚\",\"location\":\"旧索道站\",\"narrativeVoice\":\"第一人称，克制而具体\",\"knownFacts\":[\"滑轮发生卡阻\",\"原因尚未查明\",\"断电挂牌未解除\"],\"visibleActors\":[{\"name\":\"沈回\",\"appearance\":\"检修服外罩雨披，手电别在腰侧\",\"voice\":\"短句，按顺序讲\"}]}\n```\n\n## Player Agency\n不得替我虚构卡阻原因，也不得让我在挂牌未解除时进入检修桥。",
+        "actorFile": "沈回.md",
+        "actor": "# 沈回\n\n## 表面信息\n索道检修员，负责记录设备异常；没有目击卡阻瞬间。\n\n## Emotional Core\n- coreNeed：安全记录完整。\n- coreFear：违规操作或无证结论。\n- vulnerability：只能报告听见和看见的状态。\n- defensivePattern：先核对时间顺序。\n- approachPattern：按观察陈述。\n- retreatPattern：不猜故障原因。\n\n## Relationship State\n- surfaceRelationship：同事。\n- privateMeaning：主角遵守流程。\n- desiredPosition：可靠搭档。\n- perceivedPosition：专业。\n- approachImpulse：整理异响与挂牌时间线。\n- avoidanceImpulse：不夸大故障。\n- unresolvedQuestion：滑轮为何卡阻。\n- currentTension：断电牌未解除。\n- recentEvidence：雨停前听见异响。\n\n## Emotionally Salient Memories\n无。\n\n## Current Intent\n- currentEmotion：谨慎。\n- emotionalTrigger：异响复现。\n- emotionalConflict：想查明 vs 安全约束。\n- immediateGoal：整理听见和看见的顺序。\n- hiddenIntent：避免无证结论上报。\n- restraint：不进入检修桥。\n- behaviorStrategy：报告观察，等待检修。\n- voice：短句、克制。",
+        "opening": "# 主角视窗\n\n旧索道站的水汽贴在窗上。沈回把断电牌编号读了一遍，说异响发生在雨停之前。",
+        "priorHistory": [
+          {
+            "turnId": "unknown-cause-prior-1",
+            "at": "2026-09-26T09:00:00.000Z",
+            "input": "我赶到旧索道站。",
+            "output": "# 主角视窗\n\n我到达时雨刚停，断电牌已经挂好。沈回说他先听见滑轮侧传来一声闷响，随后没有再靠近检修桥。"
+          }
+        ]
+      },
+      "turn1Input": "我不进检修桥，也不判断原因。我只请沈回按顺序说清雨停前后亲耳听见、亲眼看见的情况，并指出哪些只是未知。",
+      "turn2Input": "根据刚才的记录，现在能确定卡阻原因了吗？如果还不能，请说明目前能确认的事实，以及解除挂牌前允许做什么。",
+      "initialLedger": {
+        "version": "1",
+        "events": [
+          {
+            "id": "hc-jam",
+            "kind": "event",
+            "text": "旧索道站滑轮发生一次卡阻。",
+            "source": "system",
+            "time": "雨停前",
+            "location": "旧索道站",
+            "witnesses": ["主角", "沈回"],
+            "visibility": "public",
+            "causedBy": []
+          },
+          {
+            "id": "hc-cause-unknown",
+            "kind": "unknown-cause",
+            "text": "滑轮卡阻的原因尚未查明。",
+            "source": "system",
+            "time": "雨停后傍晚",
+            "location": "旧索道站",
+            "witnesses": ["主角", "沈回"],
+            "visibility": "public",
+            "causedBy": ["hc-jam"]
+          },
+          {
+            "id": "hc-lockout",
+            "kind": "event",
+            "text": "断电挂牌未解除前不得进入检修桥。",
+            "source": "system",
+            "time": "雨停后傍晚",
+            "location": "旧索道站",
+            "witnesses": ["主角", "沈回"],
+            "visibility": "public",
+            "causedBy": ["hc-jam"]
+          }
+        ],
+        "knowledgeBoundaries": []
+      },
+      "maintenanceChecklist": [
+        "新增事实与明确听见、看见的证据一致，未把时间先后说成因果",
+        "卡阻原因仍未查明；没有无证据地 resolve 或退役 unknown-cause",
+        "断电挂牌未解除这一安全条件持续保留",
+        "更新没有虚构检修结果、原因或角色目击"
+      ],
+      "turn2Checklist": [
+        "沈回说明目前证据不足，未把猜测或异响直接写成故障原因",
+        "叙述时间顺序与雨停前异响、雨停后挂牌一致",
+        "主角没有进入检修桥，沈回没有建议违反挂牌规则",
+        "没有机械复述前一回合内容；叙事自然推进"
+      ]
+    }
+  ]
+}
