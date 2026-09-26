@@ -43,11 +43,16 @@ describe("continuity-maintenance-screening", () => {
       .toBe(scenario.sourceScenarioSha256);
   });
 
-  it("requires Kimi K3 in the screening config and an exact temporary runtime match", () => {
+  it("requires a registered screening model and an exact temporary runtime match", () => {
     expect(() => validateScreeningScenario({ ...scenario, model: "deepseek-v4.1-flash" }))
       .toThrow(/scenario.model/);
     expect(() => assertRuntimeModel(scenario.model, "deepseek-v4.1-flash")).toThrow(/does not match/);
     expect(() => assertRuntimeModel(scenario.model, "kimi-k3")).not.toThrow();
+  });
+
+  it("accepts GLM 5.3 Flash as an explicitly registered screening candidate", () => {
+    expect(() => validateScreeningScenario({ ...scenario, model: "glm-5.3-flash" })).not.toThrow();
+    expect(() => assertRuntimeModel("glm-5.3-flash", "glm-5.3-flash")).not.toThrow();
   });
 
   it("locks the promotion gate to 9 technical passes and zero hard semantic errors", () => {

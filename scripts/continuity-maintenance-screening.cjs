@@ -4,7 +4,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const continuityEval = require("./continuity-maintenance-ab-eval.cjs");
 
-const REQUIRED_MODEL = "kimi-k3";
+const SCREENING_MODELS = new Set(["kimi-k3", "glm-5.3-flash"]);
 const EXPECTED_SOURCE_HASH = /^[a-f0-9]{64}$/u;
 
 function isRecord(value) {
@@ -20,8 +20,8 @@ function requireString(value, field) {
 function validateScreeningScenario(scenario) {
   if (!isRecord(scenario)) throw new Error("screening scenario must be an object");
   requireString(scenario.experiment, "scenario.experiment");
-  if (scenario.model !== REQUIRED_MODEL) {
-    throw new Error(`scenario.model must be ${REQUIRED_MODEL}`);
+  if (!SCREENING_MODELS.has(scenario.model)) {
+    throw new Error(`scenario.model must be one of: ${[...SCREENING_MODELS].join(", ")}`);
   }
   if (scenario.piThinking !== "xhigh") throw new Error("scenario.piThinking must be xhigh (Pi max)");
   if (scenario.repeatsPerCase !== 3) throw new Error("scenario.repeatsPerCase must be 3");
