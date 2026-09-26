@@ -78,7 +78,7 @@ DeepSeek 隔离连续10回合随后启动，但按规则在正式第5回合首�
 - [x] 情感和记忆契约恢复（提示词规则已恢复；待质量验证）
 - [x] 限知叙事比较原型与 `--separated` 验收入口
 - [x] 公开连续性卡片冻结输入 A/B（语义门达到，技术总门未过；保持实验）
-- [ ] 公开连续性卡片自动维护（生命周期引擎、Pi 候选来源和快照内原子持久化已实现，`PUBLIC_CONTINUITY_CARD=1` 默认关闭；尚待真实三轮重复 A/B，设计见[`design/public-continuity-card-maintenance.md`](design/public-continuity-card-maintenance.md)）
+- [ ] 公开连续性卡片自动维护（生命周期引擎、Pi 候选来源和快照内原子持久化已实现，`PUBLIC_CONTINUITY_CARD=1` 默认关闭；首轮36调用因子项 schema 提示不完整导致 maintained 仅2/18技术通过，已补全精确 schema，待独立 Round 2，详见[`acceptance/2026-09-26-continuity-maintenance-ab-result.md`](acceptance/2026-09-26-continuity-maintenance-ab-result.md)）
 - [ ] 真实长局验收（2026-09-20 已获授权；真实小样本未过门槛，停止长局，详见 `acceptance/2026-09-20-real-pilot.md`）
 
 ## 真实验收后调整优先级（2026-09-20）

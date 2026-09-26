@@ -10,6 +10,7 @@ import {
   PI_INIT_OPENING_SYSTEM_PROMPT,
   PI_INIT_SYSTEM_PROMPT,
   PI_TURN_SYSTEM_PROMPT,
+  resolveTurnSystemPrompt,
   resolveHistoryLimit,
   resolveActorBudgetBytes,
 } from "@/lib/pi-prompt";
@@ -386,6 +387,14 @@ describe("buildTurnUserPrompt", () => {
     expect(prompt).not.toContain("R1=");
     expect(prompt).not.toContain("随机数池");
     expect(PI_TURN_SYSTEM_PROMPT).toContain("收到完整候选之后才抽样");
+  });
+
+  it("连续性卡片维护系统提示给出完整事件和生命周期 schema", () => {
+    const prompt = resolveTurnSystemPrompt(true);
+    expect(prompt).toContain('"causedBy":["既有或本批更早的事件id"]');
+    expect(prompt).toContain("九个字段全部必填");
+    expect(prompt).toContain('"evidenceIds":["最终仍保留的公开事件id"]');
+    expect(prompt).toContain("宁可不更新，也不要猜测或省略必填字段");
   });
 
   it("rollPool 缺省为空：不注入随机数池段", async () => {

@@ -75,7 +75,10 @@ export function resolveTurnSystemPrompt(publicContinuityCard: boolean): string {
     ) + `
 
 ## 公开连续性卡片维护
-factLedgerUpdate 固定为 {"version":"1","appendEvents":[],"upsertKnowledgeBoundaries":[],"resolve":[],"retireIds":[]}。appendEvents 追加本回合公开事件，事件 kind 只能是 event、unknown-cause 或 open-decision；upsertKnowledgeBoundaries 新建或更新抽象知情边界；resolve 只能处理 unknown-cause/open-decision，且 evidenceIds 必须引用最终仍保留的公开事件；retireIds 只能清理普通事件或知情边界。没有变化时全部给空数组。不得追加 private 事件，不得凭空推断证据、截止日期、默认后果或玩家未确认的重大决定。`;
+factLedgerUpdate 根对象固定为 {"version":"1","appendEvents":[],"upsertKnowledgeBoundaries":[],"resolve":[],"retireIds":[]}，五个字段缺一不可且不得增加字段。
+appendEvents 每项必须恰为 {"id":"本回合唯一稳定id","kind":"event|unknown-cause|open-decision","text":"公开事实","source":"player|model|system","time":"明确时间或当前时间","location":"地点","witnesses":["知情角色"],"visibility":"public","causedBy":["既有或本批更早的事件id"]}；九个字段全部必填，即使没有 witness 或 cause 也必须写空数组。不得追加 private 事件。
+upsertKnowledgeBoundaries 每项必须恰为 {"id":"稳定id","holders":["知情角色"]}；只表达谁掌握未公开事实，不写私密正文。resolve 每项必须恰为 {"id":"待解决事件id","evidenceIds":["最终仍保留的公开事件id"]}，且只能处理 unknown-cause/open-decision。retireIds 只能列普通 event 或 knowledge boundary 的既有 id。
+没有变化时四个操作数组全部为空。不得凭空推断证据、截止日期、默认后果或玩家未确认的重大决定；宁可不更新，也不要猜测或省略必填字段。`;
 }
 
 /** Experimental planner shares behavior rules, but emits a scene contract, not prose. */
