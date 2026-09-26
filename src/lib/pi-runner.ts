@@ -102,6 +102,33 @@ function buildResponseRepairContext(raw: string, error: unknown): string {
   ].join("\n");
 }
 
+function buildSemanticRepairContext(raw: string, issues: readonly string[]): string {
+  return [
+    "独立语义审查发现上一份候选与权威材料冲突。只修正下列问题；保留其他正文、事实、角色行为、状态和 JSON 结构。不要解释，重新输出完整 JSON。",
+    ...issues.map((issue, index) => `${index + 1}. ${sanitizeForLog(issue).slice(0, 1000)}`),
+    "上一次完整候选如下：",
+    "<previous_semantic_candidate>",
+    raw,
+    "</previous_semantic_candidate>",
+  ].join("\n");
+}
+
+export type PiSemanticReviewRequest = {
+  /** Complete authoritative turn context supplied to the generator. */
+  authoritativeContext: string;
+  /** Complete, locally valid JSON response, before any workspace write. */
+  candidateResponse: string;
+  signal: AbortSignal;
+};
+
+export type PiSemanticReviewResult =
+  | { pass: true }
+  | { pass: false; issues: string[] };
+
+export type PiSemanticReviewer = (
+  request: PiSemanticReviewRequest,
+) => Promise<PiSemanticReviewResult>;
+
 function resolveMaxAttempts(): number {
   const raw = process.env.PI_MAX_ATTEMPTS;
   const parsed = raw ? Number(raw) : NaN;
@@ -442,6 +469,7 @@ export class PiRunner implements AgentRunner {
   private readonly separateScene: boolean;
   private readonly experimentalFactLedger?: FactLedger;
   private readonly publicContinuityCard: boolean;
+  private readonly semanticReviewer?: PiSemanticReviewer;
 
   constructor(opts?: {
     spawnFn?: SpawnFn;
@@ -450,6 +478,7 @@ export class PiRunner implements AgentRunner {
     experimentalSceneSeparation?: boolean;
     experimentalFactLedger?: FactLedger;
     publicContinuityCard?: boolean;
+    semanticReviewer?: PiSemanticReviewer;
   }) {
     this.spawnFn = opts?.spawnFn ?? defaultSpawn;
     this.piPath = opts?.piPath ?? process.env.PI_PATH?.trim() ?? DEFAULT_PI_PATH;
@@ -457,6 +486,7 @@ export class PiRunner implements AgentRunner {
     this.separateScene = opts?.experimentalSceneSeparation ?? false;
     this.experimentalFactLedger = opts?.experimentalFactLedger;
     this.publicContinuityCard = opts?.publicContinuityCard ?? false;
+    this.semanticReviewer = opts?.semanticReviewer;
     if (this.publicContinuityCard && (this.separateScene || this.experimentalFactLedger)) {
       throw new Error("public continuity card cannot be combined with experimental fact ledger injection or scene separation");
     }
@@ -527,6 +557,7 @@ export class PiRunner implements AgentRunner {
     const maxAttempts = resolveMaxAttempts();
 
     let attemptsRemaining = maxAttempts;
+    let semanticRepairUsed = false;
     for (let attempt = 1; attemptsRemaining > 0; attempt++) {
       attemptsRemaining--;
       req.signal.throwIfAborted();
@@ -701,6 +732,47 @@ export class PiRunner implements AgentRunner {
         } catch (err) {
           diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(String(err)).slice(0, 2000)}`);
           responseRepairContext = buildResponseRepairContext(attemptResult.responseText, err);
+          continue;
+        }
+      }
+
+      if (this.semanticReviewer) {
+        let review: PiSemanticReviewResult;
+        try {
+          review = await this.semanticReviewer({
+            authoritativeContext: [
+              userPrompt,
+              boundRolls ? bindingRollContext(boundRolls) : "",
+            ].filter(Boolean).join("\n\n"),
+            candidateResponse: attemptResult.responseText,
+            signal: req.signal,
+          });
+        } catch (err) {
+          return {
+            success: false,
+            error: "semantic review failed",
+            detail: sanitizeForLog(String(err)).slice(0, 2000),
+          };
+        }
+        if (!review.pass) {
+          const issues = review.issues
+            .filter((issue) => typeof issue === "string" && issue.trim() !== "")
+            .slice(0, 8);
+          if (issues.length === 0) {
+            return { success: false, error: "semantic review failed", detail: "review rejection contained no issues" };
+          }
+          if (semanticRepairUsed) {
+            return {
+              success: false,
+              error: "semantic repair rejected",
+              detail: sanitizeForLog(issues.join("; ")).slice(0, 2000),
+            };
+          }
+          semanticRepairUsed = true;
+          responseRepairContext = buildSemanticRepairContext(attemptResult.responseText, issues);
+          // A semantic rejection grants exactly one new generator call. A
+          // malformed or still-invalid repair is not repaired again.
+          attemptsRemaining = 1;
           continue;
         }
       }

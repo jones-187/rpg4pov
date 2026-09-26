@@ -301,6 +301,119 @@ describe("PiRunner", () => {
       .resolves.toContain("占位");
   });
 
+  it("commits a locally valid candidate when independent semantic review passes", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeResponseSpawn([{ value: TURN_RESPONSE }]);
+    const reviews: Array<{ authoritativeContext: string; candidateResponse: string }> = [];
+
+    const result = await new PiRunner({
+      spawnFn: spawn,
+      semanticReviewer: async (request) => {
+        reviews.push(request);
+        return { pass: true };
+      },
+    }).runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success, result.detail).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].authoritativeContext).toContain("我下楼吃面");
+    expect(reviews[0].candidateResponse).toContain("主角视窗");
+    await expect(fs.readFile(path.join(dir, "turn/output.md"), "utf8"))
+      .resolves.toBe(OUTPUT_MD);
+  });
+
+  it("gives one rejected semantic candidate back for exactly one repair", async () => {
+    process.env.PI_MAX_ATTEMPTS = "1";
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const repaired = { ...TURN_RESPONSE, output: "# 主角视窗\n\n我下楼吃面，没有替任何人作决定。\n" };
+    const { spawn, calls } = makeResponseSpawn([
+      { value: TURN_RESPONSE },
+      { value: repaired },
+    ]);
+    let reviewCount = 0;
+
+    const result = await new PiRunner({
+      spawnFn: spawn,
+      semanticReviewer: async () => (++reviewCount === 1
+        ? { pass: false, issues: ["候选替玩家接受了尚未决定的安排"] }
+        : { pass: true }),
+    }).runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success, result.detail).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(reviewCount).toBe(2);
+    expect(calls[1].args.at(-1)).toContain("候选替玩家接受了尚未决定的安排");
+    expect(calls[1].args.at(-1)).toContain("<previous_semantic_candidate>");
+    await expect(fs.readFile(path.join(dir, "turn/output.md"), "utf8"))
+      .resolves.toBe(repaired.output);
+  });
+
+  it("keeps the one semantic repair after the format retry budget is consumed", async () => {
+    process.env.PI_MAX_ATTEMPTS = "2";
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const repaired = { ...TURN_RESPONSE, output: "# 主角视窗\n\n我保留这个尚未决定的选择。\n" };
+    const { spawn, calls } = makeResponseSpawn([
+      { stdout: "not a terminal response" },
+      { value: TURN_RESPONSE },
+      { value: repaired },
+    ]);
+    let reviewCount = 0;
+
+    const result = await new PiRunner({
+      spawnFn: spawn,
+      semanticReviewer: async () => (++reviewCount === 1
+        ? { pass: false, issues: ["把开放选择写成了既定决定"] }
+        : { pass: true }),
+    }).runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success, result.detail).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(reviewCount).toBe(2);
+    expect(calls[2].args.at(-1)).toContain("把开放选择写成了既定决定");
+  });
+
+  it("fails closed when the one semantic repair is rejected again", async () => {
+    process.env.PI_MAX_ATTEMPTS = "2";
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn, calls } = makeResponseSpawn([
+      { value: TURN_RESPONSE },
+      { value: TURN_RESPONSE },
+      { value: TURN_RESPONSE },
+    ]);
+
+    const result = await new PiRunner({
+      spawnFn: spawn,
+      semanticReviewer: async () => ({ pass: false, issues: ["仍含无来源事实"] }),
+    }).runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("semantic repair rejected");
+    expect(calls).toHaveLength(2);
+    await expect(fs.readFile(path.join(dir, "turn/output.md"), "utf8"))
+      .resolves.toContain("占位");
+  });
+
+  it("fails closed without writes when semantic review crashes", async () => {
+    const meta = await createStory();
+    const dir = resolveWorkspaceDir(meta.storyId);
+    const { spawn } = makeResponseSpawn([{ value: TURN_RESPONSE }]);
+
+    const result = await new PiRunner({
+      spawnFn: spawn,
+      semanticReviewer: async () => { throw new Error("reviewer unavailable"); },
+    }).runTurn(turnRequest(meta.storyId, dir));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("semantic review failed");
+    await expect(fs.readFile(path.join(dir, "turn/output.md"), "utf8"))
+      .resolves.toContain("占位");
+  });
+
   it("rejects combining public continuity card with scene separation", () => {
     expect(() => new PiRunner({
       experimentalSceneSeparation: true,

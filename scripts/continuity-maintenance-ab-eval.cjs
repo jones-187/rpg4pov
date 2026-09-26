@@ -334,6 +334,7 @@ async function runOneTurn({
   manifest,
   writeManifest,
   maxModelCalls = 1,
+  semanticReviewer,
 }) {
   const { resolveWorkspaceDir, CONTINUITY_CARD_FILE, readContinuityCard } = runtimeModules.workspace;
   const { readTurnHistoryRaw } = runtimeModules.turnHistory;
@@ -377,8 +378,8 @@ async function runOneTurn({
     },
   });
   const runnerOptions = arm === "maintained"
-    ? { spawnFn, publicContinuityCard: true }
-    : { spawnFn, experimentalFactLedger: initialLedger };
+    ? { spawnFn, publicContinuityCard: true, semanticReviewer }
+    : { spawnFn, experimentalFactLedger: initialLedger, semanticReviewer };
   const piRunner = new PiRunner(runnerOptions);
   const startedAt = Date.now();
   let outcome;
