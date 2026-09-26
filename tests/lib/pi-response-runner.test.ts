@@ -7,7 +7,8 @@ import { createStory, resolveWorkspaceDir } from "@/lib/workspace";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 const candidate = { kind: "turn", output: "# 主角视窗\n\n我把记录放上桌，守塔人抬起头。", interaction: { mode: "continue", suggestions: [] }, stateUpdate: "=== FILE: world.md ===\nAPPEND: 记录已经送到。" };
-const event = (value: unknown) => JSON.stringify({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: JSON.stringify(value) }] } });
+const rawEvent = (text: string) => JSON.stringify({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] } });
+const event = (value: unknown) => rawEvent(JSON.stringify(value));
 let saved: Record<string, string | undefined>;
 let piConfigRoot: string;
 beforeEach(async () => {
@@ -69,6 +70,34 @@ describe("server-owned complete response submission", () => {
     const outcome = await new TurnOrchestrator(runner).executeTurn(story.storyId, "送回记录");
     expect(outcome.success, outcome.error).toBe(true);
     expect(await fs.readFile(path.join(dir, "world.md"), "utf8")).toBe("# 世界\n记录已经送到\n灯塔清晨\n");
+  });
+
+  it.each([
+    ["非法顶层字段", JSON.stringify({ ...candidate, explanation: "多余说明" }), "turn response keys are invalid"],
+    ["非法 JSON", `${JSON.stringify(candidate)} trailing`, "response is not valid JSON"],
+  ])("returns the rejected %s response and parse error for one bounded repair", async (_label, rejected, expectedError) => {
+    process.env.PI_MAX_ATTEMPTS = "2";
+    const story = await createStory();
+    const prompts: string[] = [];
+    let calls = 0;
+    const runner = new PiRunner({
+      spawnFn: async (_cmd, args, opts) => {
+        calls++;
+        prompts.push(args.at(-1) ?? "");
+        opts.onStdoutLine?.(calls === 1 ? rawEvent(rejected) : event(candidate));
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    const outcome = await new TurnOrchestrator(runner).executeTurn(story.storyId, "继续记录");
+
+    expect(outcome.success, outcome.error).toBe(true);
+    expect(calls).toBe(2);
+    expect(prompts[0]).not.toContain("<previous_invalid_response>");
+    expect(prompts[1]).toContain(expectedError);
+    expect(prompts[1]).toContain(rejected);
+    expect(prompts[1]).toContain("只修正 JSON/字段结构");
+    expect(prompts[1]).toContain("正文、事实、角色归属、玩家决定、状态含义和随机结果必须保持不变");
   });
 
   it("retries a complete response when one state replace misses without committing sibling appends", async () => {

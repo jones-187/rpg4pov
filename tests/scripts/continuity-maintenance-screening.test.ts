@@ -6,6 +6,7 @@ import {
   assertRuntimeModel,
   buildScreeningPlan,
   isExactSingleCall,
+  isWithinCallBudget,
   validateScreeningScenario,
 } from "../../scripts/continuity-maintenance-screening.cjs";
 import { validateScenario as validateAbScenario } from "../../scripts/continuity-maintenance-ab-eval.cjs";
@@ -86,5 +87,18 @@ describe("continuity-maintenance-screening", () => {
       budgetViolation: true,
       callSummaries: [{}, {}],
     })).toBe(false);
+  });
+
+  it("accepts one or two real calls in the bounded repair screen", () => {
+    const record = {
+      modelCallRequests: 2,
+      modelCalls: 2,
+      budgetViolation: false,
+      turnErrorCategory: null,
+      callSummaries: [{ failure: null }, { failure: null }],
+    };
+    expect(isWithinCallBudget(record, 2)).toBe(true);
+    expect(isWithinCallBudget(record, 1)).toBe(false);
+    expect(isWithinCallBudget({ ...record, modelCallRequests: 0, modelCalls: 0, callSummaries: [] }, 2)).toBe(false);
   });
 });

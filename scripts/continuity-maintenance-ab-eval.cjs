@@ -224,13 +224,13 @@ async function saveCard(pathname, ledger) {
   await writeJsonFile(pathname, ledger ?? null);
 }
 
-function createSpawnFn({ defaultSpawn, tracker, onCallRequest }) {
+function createSpawnFn({ defaultSpawn, tracker, onCallRequest, maxModelCalls = 1 }) {
   return async (cmd, args, opts) => {
     tracker.modelCallRequests += 1;
     await onCallRequest?.();
-    if (tracker.modelCallRequests > 1) {
+    if (tracker.modelCallRequests > maxModelCalls) {
       tracker.budgetViolation = true;
-      throw new Error("evaluation budget exceeded: maximum one model call per turn");
+      throw new Error(`evaluation budget exceeded: maximum ${maxModelCalls} model call(s) per turn`);
     }
     const argValue = (name) => {
       const position = args.indexOf(name);
@@ -326,6 +326,7 @@ async function runOneTurn({
   runDir,
   manifest,
   writeManifest,
+  maxModelCalls = 1,
 }) {
   const { resolveWorkspaceDir, CONTINUITY_CARD_FILE, readContinuityCard } = runtimeModules.workspace;
   const { readTurnHistoryRaw } = runtimeModules.turnHistory;
@@ -362,6 +363,7 @@ async function runOneTurn({
   const spawnFn = createSpawnFn({
     defaultSpawn,
     tracker,
+    maxModelCalls,
     onCallRequest: async () => {
       manifest.modelCallRequests += 1;
       await writeManifest();
@@ -396,8 +398,12 @@ async function runOneTurn({
   const historyRaw = await readTurnHistoryRaw(storyId);
   const historyPath = path.join(historyDir, `after-${turnLabel}.jsonl`);
   await writeTextFile(historyPath, historyRaw ?? "");
-  const exactCallBudget = shouldContinueAfterTurn(tracker);
-  const technicalPass = Boolean(outcome.success && exactCallBudget);
+  const callBudgetSatisfied = tracker.modelCallRequests >= 1
+    && tracker.modelCallRequests <= maxModelCalls
+    && tracker.modelCalls === tracker.modelCallRequests
+    && !tracker.budgetViolation
+    && !tracker.spawnFailure;
+  const technicalPass = Boolean(outcome.success && callBudgetSatisfied);
   const piInvocationConfig = tracker.piInvocationConfig ?? null;
   const cardWriteCommitted = arm === "maintained" && technicalPass && Boolean(cardStatBefore
     && cardStatAfter && cardStatAfter.mtimeNs > cardStatBefore.mtimeNs);
@@ -411,7 +417,7 @@ async function runOneTurn({
     modelCalls: tracker.modelCalls,
     budgetViolation: tracker.budgetViolation,
     technicalPass,
-    technicalStatus: exactCallBudget
+    technicalStatus: callBudgetSatisfied
       ? (technicalPass ? "pass" : "hard-failure-one-call")
       : "infrastructure-budget-error",
     turnErrorCategory: outcome.success ? null

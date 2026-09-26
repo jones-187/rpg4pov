@@ -46,10 +46,17 @@ function fail(reason: string): never {
   throw new Error(`invalid Pi response: ${reason}`);
 }
 
-function hasExactlyKeys(value: UnknownRecord, keys: readonly string[]): boolean {
+function exactKeyProblem(value: UnknownRecord, keys: readonly string[]): string | null {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+  if (actual.length === expected.length && actual.every((key, index) => key === expected[index])) {
+    return null;
+  }
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(actual);
+  const missing = expected.filter((key) => !actualSet.has(key));
+  const unexpected = actual.filter((key) => !expectedSet.has(key));
+  return `missing=[${missing.join(",")}], unexpected=[${unexpected.join(",")}]`;
 }
 
 /**
@@ -80,8 +87,10 @@ export function parseResponseJson(raw: string): unknown {
 
 /** Strict parser shared by response consumers and scene/render paths. */
 export function parseResponseInteraction(value: unknown): TurnInteraction {
-  if (!isRecord(value) || !hasExactlyKeys(value, ["mode", "suggestions"])) {
-    fail("interaction keys are invalid");
+  if (!isRecord(value)) fail("interaction must be an object");
+  const keyProblem = exactKeyProblem(value, ["mode", "suggestions"]);
+  if (keyProblem) {
+    fail(`interaction keys are invalid: ${keyProblem}`);
   }
   if (value.mode !== "continue" && value.mode !== "decision") {
     fail("interaction mode is invalid");
@@ -155,8 +164,9 @@ function parseTurn(
   const requiredKeys = options.factLedgerUpdate === "required"
     ? ["kind", "output", "interaction", "stateUpdate", "factLedgerUpdate"]
     : ["kind", "output", "interaction", "stateUpdate"];
-  if (!hasExactlyKeys(value, requiredKeys)) {
-    fail("turn response keys are invalid");
+  const keyProblem = exactKeyProblem(value, requiredKeys);
+  if (keyProblem) {
+    fail(`turn response keys are invalid: ${keyProblem}`);
   }
   if (value.kind !== "turn") fail("response kind is invalid");
   const output = parseResponseOutput(value.output);
@@ -176,7 +186,8 @@ function parseTurn(
 }
 
 function parseRollRequest(value: UnknownRecord): PiRollRequestResponse {
-  if (!hasExactlyKeys(value, ["kind", "rolls"])) fail("roll request keys are invalid");
+  const keyProblem = exactKeyProblem(value, ["kind", "rolls"]);
+  if (keyProblem) fail(`roll request keys are invalid: ${keyProblem}`);
   if (value.kind !== "roll-request") fail("response kind is invalid");
   if (!Array.isArray(value.rolls) || value.rolls.length < 1 || value.rolls.length > 6) {
     fail("roll request must contain 1-6 rolls");

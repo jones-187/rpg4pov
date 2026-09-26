@@ -26,7 +26,9 @@ function validateScreeningScenario(scenario) {
   if (scenario.piThinking !== "xhigh") throw new Error("scenario.piThinking must be xhigh (Pi max)");
   if (scenario.repeatsPerCase !== 3) throw new Error("scenario.repeatsPerCase must be 3");
   if (scenario.arm !== "maintained") throw new Error("scenario.arm must be maintained");
-  if (scenario.callsPerTurn !== 1) throw new Error("scenario.callsPerTurn must be 1");
+  if (scenario.callsPerTurn !== 1 && scenario.callsPerTurn !== 2) {
+    throw new Error("scenario.callsPerTurn must be 1 or 2");
+  }
   if (scenario.automaticRetries !== 0) throw new Error("scenario.automaticRetries must be 0");
   if (typeof scenario.sourceScenario !== "string"
     || !/^[^/\\]+\.json$/u.test(scenario.sourceScenario)) {
@@ -73,6 +75,19 @@ function isExactSingleCall(record) {
     && Array.isArray(record.callSummaries)
     && record.callSummaries.length === 1
     && record.callSummaries[0].failure !== "spawn failed";
+}
+
+function isWithinCallBudget(record, maximumCalls) {
+  return Number.isInteger(maximumCalls)
+    && maximumCalls >= 1
+    && record.modelCallRequests >= 1
+    && record.modelCallRequests <= maximumCalls
+    && record.modelCalls === record.modelCallRequests
+    && record.budgetViolation !== true
+    && record.turnErrorCategory !== "spawn-failed"
+    && Array.isArray(record.callSummaries)
+    && record.callSummaries.length === record.modelCalls
+    && record.callSummaries.every((call) => call.failure !== "spawn failed");
 }
 
 async function readJson(file) {
@@ -152,12 +167,14 @@ async function runScreeningCase({ runtimeModules, output, planEntry, manifest, w
     runDir,
     manifest,
     writeManifest,
+    maxModelCalls: manifest.callsPerTurn,
   });
   if (turn.playerResponse !== null) {
     await writeText(path.join(runDir, "turn-1-response.md"), `${turn.playerResponse}\n`);
   }
 
   const exactSingleCall = isExactSingleCall(turn);
+  const withinCallBudget = isWithinCallBudget(turn, manifest.callsPerTurn);
   const result = {
     index,
     caseId: testCase.id,
@@ -166,6 +183,7 @@ async function runScreeningCase({ runtimeModules, output, planEntry, manifest, w
     storyId: story.storyId,
     technicalPass: turn.technicalPass,
     exactSingleCall,
+    withinCallBudget,
     modelCallRequests: turn.modelCallRequests,
     modelCalls: turn.modelCalls,
     canonicalCardWriteCommitted: turn.canonicalCardWriteCommitted,
@@ -202,7 +220,7 @@ async function main() {
 
   await continuityEval.ensureOutputDirectory(output);
   process.env.WORKSPACE_ROOT = path.join(output, "live-workspaces");
-  process.env.PI_MAX_ATTEMPTS = "1";
+  process.env.PI_MAX_ATTEMPTS = String(scenario.callsPerTurn);
 
   const startedAt = new Date().toISOString();
   const manifest = {
@@ -214,13 +232,13 @@ async function main() {
     model: runtimeModel,
     piThinking: scenario.piThinking,
     arm: scenario.arm,
-    maxAttempts: 1,
-    callsPerTurn: 1,
+    maxAttempts: scenario.callsPerTurn,
+    callsPerTurn: scenario.callsPerTurn,
     automaticRetries: 0,
     repeatsPerCase: scenario.repeatsPerCase,
     caseCount: sourceScenario.cases.length,
     plannedRuns: plan.length,
-    plannedCalls: plan.length,
+    maximumPlannedCalls: plan.length * scenario.callsPerTurn,
     modelCallRequests: 0,
     modelCalls: 0,
     completedTurnRuns: 0,
@@ -239,8 +257,8 @@ async function main() {
     model: runtimeModel,
     piThinking: scenario.piThinking,
     arm: scenario.arm,
-    callsPerTurn: 1,
-    maxAttempts: 1,
+    callsPerTurn: scenario.callsPerTurn,
+    maxAttempts: scenario.callsPerTurn,
     automaticRetries: 0,
     promotionGate: scenario.promotionGate,
   });
@@ -254,8 +272,8 @@ async function main() {
         manifest,
         writeManifest,
       });
-      if (!result.exactSingleCall) {
-        const error = new Error(`run ${result.index} did not make exactly one model call`);
+      if (!result.withinCallBudget) {
+        const error = new Error(`run ${result.index} exceeded or missed its model call budget`);
         error.code = "call-budget-violation";
         throw error;
       }
@@ -285,4 +303,5 @@ module.exports = {
   assertRuntimeModel,
   buildScreeningPlan,
   isExactSingleCall,
+  isWithinCallBudget,
 };

@@ -265,4 +265,13 @@ describe("parseTurnResponse", () => {
     expect(parseResponseJson("```json\n{\"ok\":true}\n```")).toEqual({ ok: true });
     expect(() => parseResponseJson("前言 {\"ok\":true}")).toThrow();
   });
+
+  it("精确报告 turn 响应缺失和多余的字段", () => {
+    const value = JSON.parse(textResponse()) as Record<string, unknown>;
+    delete value.interaction;
+    value.explanation = "多余说明";
+    expect(() => parseTurnResponse(JSON.stringify(value))).toThrow(
+      /turn response keys are invalid: missing=\[interaction\], unexpected=\[explanation\]/,
+    );
+  });
 });

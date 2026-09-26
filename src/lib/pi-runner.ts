@@ -86,6 +86,22 @@ function buildPiEnv(allowedPaths: readonly string[]): Record<string, string | un
   return env;
 }
 
+/**
+ * Give the same model its rejected answer back so it can repair the envelope
+ * instead of regenerating the turn from memory.  The parser remains the sole
+ * authority: this text grants no permission to change story semantics.
+ */
+function buildResponseRepairContext(raw: string, error: unknown): string {
+  return [
+    "上一次完整响应未通过严格结构校验。只修正 JSON/字段结构，正文、事实、角色归属、玩家决定、状态含义和随机结果必须保持不变。不要解释，重新输出完整 JSON。",
+    `校验错误：${sanitizeForLog(String(error)).slice(0, 2000)}`,
+    "上一次完整响应如下：",
+    "<previous_invalid_response>",
+    raw,
+    "</previous_invalid_response>",
+  ].join("\n");
+}
+
 function resolveMaxAttempts(): number {
   const raw = process.env.PI_MAX_ATTEMPTS;
   const parsed = raw ? Number(raw) : NaN;
@@ -507,6 +523,7 @@ export class PiRunner implements AgentRunner {
     let boundRolls: BoundTurnRoll[] | undefined;
 
     const diagnostics: string[] = [];
+    let responseRepairContext = "";
     const maxAttempts = resolveMaxAttempts();
 
     let attemptsRemaining = maxAttempts;
@@ -526,7 +543,7 @@ export class PiRunner implements AgentRunner {
           this.separateScene
             ? PI_SCENE_PLAN_SYSTEM_PROMPT
             : resolveTurnSystemPrompt(this.publicContinuityCard),
-          [userPrompt, boundRolls ? bindingRollContext(boundRolls) : "", diagnostics.length ? `上次完整响应未通过，请修正：${diagnostics.at(-1)}` : ""].join("\n\n")),
+          [userPrompt, boundRolls ? bindingRollContext(boundRolls) : "", responseRepairContext].join("\n\n")),
         phase: this.separateScene ? "turn-plan" : "turn",
         allowedPaths: [],
         token: attemptToken,
@@ -554,11 +571,16 @@ export class PiRunner implements AgentRunner {
       }
       if (attemptResult.responseError || !attemptResult.responseText) {
         diagnostics.push(`attempt ${attempt}: ${attemptResult.responseError ?? "complete response missing"}`);
+        responseRepairContext = `上一次调用没有产生可解析的完整响应：${diagnostics.at(-1)}`;
         continue;
       }
       let value: unknown;
       try { value = parseResponseJson(attemptResult.responseText); }
-      catch (error) { diagnostics.push(`attempt ${attempt}: ${String(error)}`); continue; }
+      catch (error) {
+        diagnostics.push(`attempt ${attempt}: ${String(error)}`);
+        responseRepairContext = buildResponseRepairContext(attemptResult.responseText, error);
+        continue;
+      }
       if (value && typeof value === "object" && (value as { kind?: unknown }).kind === "roll-request") {
         if (boundRolls) return { success: false, error: "random candidates already bound" };
         let requestRaw: string;
@@ -570,6 +592,7 @@ export class PiRunner implements AgentRunner {
           nextBoundRolls = bindTurnRolls(requestRaw, req.storyId, req.workspaceDir, this.rollRng);
         } catch (err) {
           diagnostics.push(`attempt ${attempt}: invalid roll request: ${sanitizeForLog(String(err))}`);
+          responseRepairContext = buildResponseRepairContext(attemptResult.responseText, err);
           continue;
         }
         try {
@@ -639,7 +662,11 @@ export class PiRunner implements AgentRunner {
           });
           if (parsed.kind !== "turn") throw new Error("expected complete turn");
           candidate = parsed;
-        } catch (error) { diagnostics.push(`attempt ${attempt}: ${String(error)}`); continue; }
+        } catch (error) {
+          diagnostics.push(`attempt ${attempt}: ${String(error)}`);
+          responseRepairContext = buildResponseRepairContext(attemptResult.responseText, error);
+          continue;
+        }
       }
 
       // Validate all candidate changes before committing any state or audit log.
@@ -672,8 +699,9 @@ export class PiRunner implements AgentRunner {
         try {
           nextLedger = applyFactLedgerUpdate(ledger, candidate.factLedgerUpdate);
         } catch (err) {
-        diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(String(err)).slice(0, 2000)}`);
-        continue;
+          diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(String(err)).slice(0, 2000)}`);
+          responseRepairContext = buildResponseRepairContext(attemptResult.responseText, err);
+          continue;
         }
       }
 
@@ -688,6 +716,7 @@ export class PiRunner implements AgentRunner {
           // Thrown I/O errors can follow partial writes and must roll back.
           if (attemptsRemaining > 0) {
             diagnostics.push(`attempt ${attempt}: ${sanitizeForLog(applied.errors.join("; ")).slice(0, 2000)}`);
+            responseRepairContext = buildResponseRepairContext(attemptResult.responseText, applied.errors.join("; "));
             continue;
           }
           throw new Error(applied.errors.join("; "));

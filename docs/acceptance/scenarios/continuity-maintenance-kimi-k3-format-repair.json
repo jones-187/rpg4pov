@@ -1,0 +1,16 @@
+{
+  "experiment": "public-continuity-card-kimi-k3-format-repair",
+  "model": "kimi-k3",
+  "piThinking": "xhigh",
+  "repeatsPerCase": 3,
+  "arm": "maintained",
+  "callsPerTurn": 2,
+  "automaticRetries": 0,
+  "sourceScenario": "continuity-maintenance-ab.json",
+  "sourceScenarioSha256": "9a16f6a2c8cd0b55d3b34ad0244e2d06fdeb1f79811b6d30b4bd0053e5da1e5c",
+  "promotionGate": {
+    "technicalPasses": 9,
+    "hardSemanticErrors": 0,
+    "nextStage": "complete-36-call-ab"
+  }
+}
