@@ -21,7 +21,16 @@ export async function POST(request: Request) {
   // 若同时提供了 input，则按普通回合处理（不静默丢弃玩家输入）。
   const rawCommand = (body as { command?: unknown }).command;
   const isContinue = rawCommand === "continue" && !input;
-  if (!input && !isContinue) {
+  const isRetry = rawCommand === "retry" && !input;
+  const rawCorrection = (body as { correction?: unknown }).correction;
+  if (isRetry && rawCorrection !== undefined && typeof rawCorrection !== "string") {
+    return NextResponse.json({ error: "correction must be a string" }, { status: 400 });
+  }
+  const correction = typeof rawCorrection === "string" ? rawCorrection.trim() : undefined;
+  if (correction && correction.length > 2000) {
+    return NextResponse.json({ error: "correction is too long" }, { status: 400 });
+  }
+  if (!input && !isContinue && !isRetry) {
     return NextResponse.json({ error: "input is required" }, { status: 400 });
   }
 
@@ -40,12 +49,19 @@ export async function POST(request: Request) {
   // 回合失败 → 500 + retryInput（回填输入框供重试）。
   // 用户只看固定中文提示，内部 error 分类只进 logs/turn-errors.log（US 42）。
   try {
-    const outcome = await orchestrator.executeTurn(storyId, input, {
-      systemCommand: isContinue ? "continue" : undefined,
-    });
+    const outcome = isRetry
+      ? await orchestrator.retryLatestTurn(storyId, correction)
+      : await orchestrator.executeTurn(storyId, input, {
+          systemCommand: isContinue ? "continue" : undefined,
+        });
     if (!outcome.success || !outcome.playerResponse) {
+      if (isRetry && outcome.error === "latest turn is not retryable") {
+        return NextResponse.json({ error: "当前没有可重写的最新回合" }, { status: 409 });
+      }
       return NextResponse.json(
-        { error: "回合执行失败，请重试", retryInput: input },
+        isRetry
+          ? { error: "重写失败，原回合已保留" }
+          : { error: "回合执行失败，请重试", retryInput: input },
         { status: 500 },
       );
     }
@@ -53,6 +69,7 @@ export async function POST(request: Request) {
       playerResponse: outcome.playerResponse,
       turn: outcome.turn, // Issue 6.5: 返回 committed entry
       interaction: outcome.interaction, // Issue 10: 净化后的交互状态
+      replaced: isRetry,
     });
   } catch (e) {
     if (e instanceof TurnBusyError) {
@@ -61,9 +78,11 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    // 非 TurnBusyError 的意外异常：统一走 500 + retryInput
+    // 非 TurnBusyError 的意外异常：重写不回填输入，普通回合回填原输入。
     return NextResponse.json(
-      { error: "回合执行失败，请重试", retryInput: input },
+      isRetry
+        ? { error: "重写失败，原回合已保留" }
+        : { error: "回合执行失败，请重试", retryInput: input },
       { status: 500 },
     );
   }

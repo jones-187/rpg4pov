@@ -9,6 +9,7 @@ import {
   type TurnInteraction,
 } from "@/lib/interaction-schema";
 import type { TurnProgress } from "@/lib/turn-progress";
+import { canRetryLatestTurn, replaceLatestTurn } from "@/lib/story-page-helpers";
 
 interface StoryMeta {
   storyId: string;
@@ -148,6 +149,8 @@ export default function StoryPage() {
   const [pendingInput, setPendingInput] = useState<string | null>(null);
   // 预排队：等待期允许打好下一步，上一回合落定即自动发送（think/打字时间藏进生成时间）
   const [queuedInput, setQueuedInput] = useState<string | null>(null);
+  const [retryOpen, setRetryOpen] = useState(false);
+  const [retryCorrection, setRetryCorrection] = useState("");
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -231,13 +234,15 @@ export default function StoryPage() {
       refill: (text: string) => void;
       onSuccess: () => void;
       pollPreview?: boolean;
+      historyMode?: "append" | "replace-latest";
+      echoInput?: string;
     },
   ) {
     setLoading(true);
     setPendingSince(Date.now());
     setError(null);
     // 乐观回显：继续命令显示固定标签（与 committed history 的 label 一致）
-    const echoText =
+    const echoText = opts.echoInput ??
       payload.input ?? (payload.command === "continue" ? "（继续）" : payload.setting) ?? "";
     setPendingInput(echoText !== "" ? echoText : null);
     let pollAlive = true;
@@ -287,7 +292,9 @@ export default function StoryPage() {
       if (!turn) {
         throw new Error("响应格式错误：缺少 committed turn");
       }
-      setHistory((prev) => [...prev, turn]);
+      setHistory((prev) => opts.historyMode === "replace-latest"
+        ? replaceLatestTurn(prev, turn)
+        : [...prev, turn]);
       // Issue 10：更新交互状态（缺失/不合法时降级为连续演出态）
       setInteraction(parseInteraction((data as { interaction?: unknown }).interaction));
       opts.onSuccess();
@@ -357,6 +364,27 @@ export default function StoryPage() {
     });
   }
 
+  async function handleRetryLatest() {
+    if (!canRetryLatestTurn(history.length, loading, queuedInput !== null)) return;
+    const latest = history.at(-1);
+    if (!latest) return;
+    const correction = retryCorrection.trim();
+    await submitTurnLike("/api/story-turn", {
+      storyId,
+      command: "retry",
+      ...(correction ? { correction } : {}),
+    }, {
+      refill: () => {},
+      onSuccess: () => {
+        setRetryOpen(false);
+        setRetryCorrection("");
+      },
+      pollPreview: true,
+      historyMode: "replace-latest",
+      echoInput: latest.input,
+    });
+  }
+
   if (notFound) {
     return (
       <main className="container">
@@ -380,7 +408,7 @@ export default function StoryPage() {
             <p className="muted">故事已创建。先在下方输入故事设定完成初始化，然后开始第一回合。</p>
           )
         ) : (
-          history.map((turn) => (
+          history.map((turn, index) => (
             <div key={turn.turnId} className="turn-entry">
               <div className="turn-input-block">
                 <h3 className="turn-block-title">你</h3>
@@ -390,6 +418,42 @@ export default function StoryPage() {
                 <h3 className="turn-block-title">主角视窗</h3>
                 <div className="turn-output-content">{normalizeOutput(turn.output)}</div>
               </div>
+              {index === history.length - 1 && history.length > 1 && (
+                <div className="turn-retry">
+                  {!retryOpen ? (
+                    <button
+                      type="button"
+                      className="turn-retry-link"
+                      disabled={!canRetryLatestTurn(history.length, loading, queuedInput !== null)}
+                      onClick={() => setRetryOpen(true)}
+                    >
+                      重写本回合
+                    </button>
+                  ) : (
+                    <div className="turn-retry-editor">
+                      <textarea
+                        value={retryCorrection}
+                        onChange={(event) => setRetryCorrection(event.target.value)}
+                        placeholder="可选：指出这次哪里需要改正（不会记成主角行动）"
+                        rows={2}
+                        maxLength={2000}
+                        disabled={loading}
+                      />
+                      <div className="turn-retry-actions">
+                        <button type="button" disabled={loading} onClick={() => void handleRetryLatest()}>
+                          {loading ? "重写中…" : "确认重写"}
+                        </button>
+                        <button type="button" disabled={loading} onClick={() => {
+                          setRetryOpen(false);
+                          setRetryCorrection("");
+                        }}>
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

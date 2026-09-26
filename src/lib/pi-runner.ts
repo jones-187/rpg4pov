@@ -550,7 +550,12 @@ export class PiRunner implements AgentRunner {
       this.publicContinuityCard ? ledger : this.experimentalFactLedger,
       this.publicContinuityCard,
     );
-    let boundRolls: BoundTurnRoll[] | undefined;
+    // 重写同一回合时直接注入上次已绑定结果。模型只能据此重新叙述，
+    // 不能再次申请候选或消耗随机源。
+    let boundRolls: BoundTurnRoll[] | undefined = req.replayRolls?.map((roll) => ({
+      ...roll,
+      candidates: roll.candidates.map((candidate) => ({ ...candidate })),
+    }));
 
     const diagnostics: string[] = [];
     let responseRepairContext = "";

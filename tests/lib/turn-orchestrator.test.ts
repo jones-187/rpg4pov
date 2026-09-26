@@ -87,6 +87,75 @@ class ControlledRunner implements AgentRunner {
 // --- 测试 ---
 
 describe("TurnOrchestrator", () => {
+  it("retry failure restores the previously committed latest turn", async () => {
+    const meta = await createStory({ title: "retry rollback" });
+    let call = 0;
+    const runner: AgentRunner = {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        call++;
+        if (call === 1) return new FakeAgentRunner().runTurn(req);
+        await fs.writeFile(path.join(req.workspaceDir, "world.md"), "被失败重写污染");
+        return { success: false, error: "forced retry failure" };
+      },
+    };
+    const orchestrator = new TurnOrchestrator(runner);
+    const committed = await orchestrator.executeTurn(meta.storyId, "推门");
+    const beforeHistory = await readTurnHistory(meta.storyId);
+    const beforeOutput = await readTurnOutput(meta.storyId);
+    const beforeWorld = await fs.readFile(path.join(resolveWorkspaceDir(meta.storyId), "world.md"), "utf8");
+
+    const retried = await orchestrator.retryLatestTurn(meta.storyId, "换一种写法");
+
+    expect(retried.success).toBe(false);
+    expect(await readTurnHistory(meta.storyId)).toEqual(beforeHistory);
+    expect(await readTurnOutput(meta.storyId)).toBe(beforeOutput);
+    expect(await fs.readFile(path.join(resolveWorkspaceDir(meta.storyId), "world.md"), "utf8")).toBe(beforeWorld);
+    expect(committed.turn?.turnId).toBe(beforeHistory?.[0].turnId);
+  });
+
+  it("retry reuses the committed random binding instead of drawing again", async () => {
+    const meta = await createStory({ title: "retry random replay" });
+    const roll = {
+      at: new Date().toISOString(),
+      storyId: meta.storyId,
+      rollId: "door",
+      type: "roll-choice",
+      candidates: [{ id: "open", weight: 1 }, { id: "stuck", weight: 1 }],
+      selectedId: "stuck",
+      randomSource: "pool",
+      sample: 0.75,
+    };
+    const seenReplay: TurnRequest["replayRolls"][] = [];
+    const runner: AgentRunner = {
+      async runTurn(req: TurnRequest): Promise<TurnResult> {
+        seenReplay.push(req.replayRolls);
+        await fs.mkdir(path.join(req.workspaceDir, "logs"), { recursive: true });
+        await fs.appendFile(
+          path.join(req.workspaceDir, "logs", "random-rolls.jsonl"),
+          `${JSON.stringify(roll)}\n`,
+        );
+        await fs.writeFile(path.join(req.workspaceDir, "turn", "output.md"), "# 主角视窗\n\n木门纹丝不动。");
+        await fs.writeFile(
+          path.join(req.workspaceDir, "turn", "done.json"),
+          JSON.stringify({ status: "success", completedAt: new Date().toISOString() }),
+        );
+        return { success: true };
+      },
+    };
+    const orchestrator = new TurnOrchestrator(runner);
+    expect((await orchestrator.executeTurn(meta.storyId, "推门")).success).toBe(true);
+    expect((await orchestrator.retryLatestTurn(meta.storyId)).success).toBe(true);
+
+    expect(seenReplay[0]).toBeUndefined();
+    expect(seenReplay[1]).toEqual([{
+      index: 1,
+      rollId: "door",
+      candidates: roll.candidates,
+      sample: 0.75,
+      selectedId: "stuck",
+    }]);
+  });
+
   it("success: FakeAgentRunner → returns playerResponse from output.md", async () => {
     const meta = await createStory({ title: "orchestrator 成功" });
     const orchestrator = new TurnOrchestrator(new FakeAgentRunner());

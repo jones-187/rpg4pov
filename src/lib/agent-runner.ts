@@ -22,6 +22,8 @@ export interface TurnRequest {
   playerInput: string;
   /** 执行任务类型，默认 "turn"（Issue 7） */
   task?: RunnerTask;
+  /** 重写同一回合时复用的服务端随机绑定；不得重新抽样。 */
+  replayRolls?: import("./turn-rolls").BoundTurnRoll[];
   /**
    * 回合超时信号（Issue 4）。
    * 由 Orchestrator 用 AbortSignal.timeout(ms) 创建。

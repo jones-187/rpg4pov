@@ -205,6 +205,14 @@ init 契约（性能优化分支）要求 done.json **永远是最后一步**，
 回合开始前由 Orchestrator 创建的整个 Story Workspace 目录副本，用于失败回滚。**不是 Story Workspace 的一部分，不是故事状态**——是瞬态恢复机制，存活期不超过一次回合。存放在 Story Workspace 目录之外（`{WORKSPACE_ROOT}/.snapshots/{storyId}/`），每故事单份、回合前覆盖。
 _Avoid_: 版本历史、备份、checkpoint
 
+### Latest Turn Rewrite（最新回合重写）
+玩家要求重新生成最近一个普通 Story Turn，而不是提交新的主角行动。可附带只对本次生成有效的纠错说明；该说明不写入 Turn History，也不进入 Confirmed Adjustments。成功后以同一 `turnId` 替换末条历史，较早历史不变；失败则恢复重写前已提交的完整状态。开场不可重写，新普通回合成功后上一个回合即不再可重写。
+_Avoid_: 追加成新回合、修改更早历史、把本次纠错偷偷升级为长期偏好、失败后丢掉旧回合
+
+### Turn Retry Checkpoint（回合重写检查点）
+最新普通回合开始前的完整 Story Workspace 副本，以及该回合原输入和已绑定随机结果。普通回合成功提交后才保存，位于 `{WORKSPACE_ROOT}/.turn-retry/{storyId}/`，不属于故事状态；下一个普通回合成功后覆盖。重写使用它回到相同起点，并复用原随机绑定，不能通过重写刷新结果。重写执行前仍创建 Turn Snapshot，以便任何失败恢复旧的已提交回合。
+_Avoid_: 长期版本库、无限撤销栈、重新抽随机、把检查点暴露给模型或玩家
+
 ### Turn History（回合历史）
 已提交的玩家可见故事时间线，存储在 `turns/history.jsonl`。条目概念上包括 opening（开场内容，无主角行动输入，input 记录用户设定）和 turn（正常回合，有主角行动输入）。由受信任的系统提交者（初始化流程提交 opening，TurnOrchestrator 提交 turn）追加。Runner / Claude 不得直接修改。是玩家视角的完整故事记录，用于前端展示和 Claude Code Runner 冷启动上下文。
 _Avoid_: 完整世界状态、God State 日志、版本历史、checkpoint

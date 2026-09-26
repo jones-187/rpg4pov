@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { POST } from "@/app/api/story-turn/route";
 import { createStory, markStoryInitialized, readTurnOutput, resolveWorkspaceRoot } from "@/lib/workspace";
+import { readTurnHistory } from "@/lib/turn-history";
 import { useTempWorkspaceRoot, resetWorkspaceRoot } from "../helpers/workspace-env";
 
 let root: string;
@@ -224,5 +225,66 @@ describe("POST /api/story-turn command+input precedence (Issue 10)", () => {
     // 玩家输入不因 command 字段被静默丢弃
     expect(json.turn.input).toBe("开口问店主今晚有没有空房");
     expect(json.playerResponse).toContain("开口问店主今晚有没有空房");
+  });
+});
+
+describe("POST /api/story-turn retry latest turn", () => {
+  it("rejects retry when no ordinary turn has been committed", async () => {
+    const storyId = await freshStory();
+    const retried = await POST(req({ storyId, command: "retry" }));
+    expect(retried.status).toBe(409);
+    expect(await readTurnHistory(storyId)).toEqual([]);
+  });
+
+  it("replaces the latest committed turn while preserving its player input", async () => {
+    const storyId = await freshStory();
+    const first = await POST(req({ storyId, input: "推开木门" }));
+    expect(first.status).toBe(200);
+    const firstJson = await first.json();
+
+    const retried = await POST(req({
+      storyId,
+      command: "retry",
+      correction: "这次不要写得含糊",
+    }));
+
+    expect(retried.status).toBe(200);
+    const retriedJson = await retried.json();
+    expect(retriedJson.turn.input).toBe("推开木门");
+    expect(retriedJson.turn.turnId).toBe(firstJson.turn.turnId);
+    const history = await readTurnHistory(storyId);
+    expect(history).toHaveLength(1);
+    expect(history?.[0]).toEqual(retriedJson.turn);
+  });
+
+  it("replaces only the latest turn and keeps earlier history unchanged", async () => {
+    const storyId = await freshStory();
+    const first = await POST(req({ storyId, input: "先观察门外" }));
+    const firstTurn = (await first.json()).turn;
+    const second = await POST(req({ storyId, input: "再推开木门" }));
+    const secondTurn = (await second.json()).turn;
+
+    const retried = await POST(req({ storyId, command: "retry" }));
+    expect(retried.status).toBe(200);
+    const retriedTurn = (await retried.json()).turn;
+    const history = await readTurnHistory(storyId);
+    expect(history).toHaveLength(2);
+    expect(history?.[0]).toEqual(firstTurn);
+    expect(history?.[1].turnId).toBe(secondTurn.turnId);
+    expect(history?.[1]).toEqual(retriedTurn);
+  });
+
+  it("treats correction as retry-only context, not a new history input", async () => {
+    const storyId = await freshStory();
+    await POST(req({ storyId, input: "询问守卫" }));
+    const retried = await POST(req({
+      storyId,
+      command: "retry",
+      correction: "守卫已经见过主角，不要写成陌生人",
+    }));
+    expect(retried.status).toBe(200);
+    const history = await readTurnHistory(storyId);
+    expect(history?.at(-1)?.input).toBe("询问守卫");
+    expect(history?.at(-1)?.input).not.toContain("不要写成陌生人");
   });
 });

@@ -23,7 +23,7 @@ import {
 } from "./turn-snapshot";
 import { appendTurnError } from "./turn-error-log";
 import { clearTurnProgress } from "./turn-progress";
-import { appendTurnHistory, readTurnHistoryRaw, type TurnHistoryEntry } from "./turn-history";
+import { appendTurnHistory, readTurnHistory, readTurnHistoryRaw, type TurnHistoryEntry } from "./turn-history";
 import {
   readTurnInteraction,
   readTurnInteractionRawLine,
@@ -31,6 +31,13 @@ import {
 } from "./turn-interaction";
 import { CONTINUE_TURN_INPUT_TEXT, CONTINUE_HISTORY_LABEL } from "./claude-prompt";
 import crypto from "node:crypto";
+import {
+  readTurnRetryCheckpoint,
+  restoreTurnRetryCheckpoint,
+  saveTurnRetryCheckpoint,
+  parseReplayRolls,
+} from "./turn-retry";
+import type { BoundTurnRoll } from "./turn-rolls";
 
 /** 默认回合超时 300s（Issue 6）。可经 TURN_TIMEOUT_MS 覆盖。 */
 function resolveTurnTimeoutMs(): number {
@@ -55,6 +62,15 @@ export interface TurnOutcome {
 export interface ExecuteTurnOptions {
   task?: RunnerTask;
   systemCommand?: "continue";
+}
+
+interface RunWithSnapshotOptions extends ExecuteTurnOptions {
+  snapshotAlreadyCreated?: boolean;
+  runnerInputOverride?: string;
+  historyInputOverride?: string;
+  turnIdOverride?: string;
+  retrying?: boolean;
+  replayRolls?: BoundTurnRoll[];
 }
 
 /**
@@ -109,24 +125,66 @@ export class TurnOrchestrator {
     }
   }
 
+  async retryLatestTurn(storyId: string, correction?: string): Promise<TurnOutcome> {
+    const unsafe = await readWorkspaceUnsafeMarker(storyId);
+    if (unsafe) {
+      return { success: false, playerResponse: null, error: "workspace unsafe: " + unsafe.reason };
+    }
+
+    const release = this.lock.acquire(storyId);
+    try {
+      const checkpoint = await readTurnRetryCheckpoint(storyId);
+      const history = await readTurnHistory(storyId);
+      const latest = history?.at(-1);
+      if (!checkpoint || !latest || latest.turnId !== checkpoint.turnId) {
+        return { success: false, playerResponse: null, error: "latest turn is not retryable" };
+      }
+
+      // This snapshot contains the currently committed turn. If regeneration
+      // fails, failTurn restores it so Retry is never destructive.
+      await createSnapshot(storyId);
+      try {
+        await restoreTurnRetryCheckpoint(storyId);
+      } catch (error) {
+        return this.failTurn(storyId, "retry checkpoint restore failed", checkpoint.playerInput, String(error));
+      }
+
+      const correctionContext = correction?.trim()
+        ? `\n\n【系统指令·重写】玩家只纠正本次生成：${correction.trim()}。这不是新的主角行动，也不得写入长期偏好。`
+        : "\n\n【系统指令·重写】重新生成同一回合。这不是新的主角行动，不得改变已绑定随机结果。";
+      return await this.runWithSnapshot(storyId, checkpoint.playerInput, {
+        snapshotAlreadyCreated: true,
+        runnerInputOverride: checkpoint.runnerInput + correctionContext,
+        historyInputOverride: checkpoint.historyInput,
+        turnIdOverride: checkpoint.turnId,
+        retrying: true,
+        replayRolls: checkpoint.replayRolls,
+      });
+    } finally {
+      release();
+      clearTurnProgress(storyId);
+    }
+  }
+
   private async runWithSnapshot(
     storyId: string,
     playerInput: string,
-    opts?: ExecuteTurnOptions,
+    opts?: RunWithSnapshotOptions,
   ): Promise<TurnOutcome> {
     const task = opts?.task;
     // Issue 10：系统级"继续"命令。runner 看到的是系统指令文本（不是主角台词），
     // 玩家可见历史中记录固定标签（不是主角发言），失败日志仍记原始语义。
-    const runnerInput =
-      opts?.systemCommand === "continue" ? CONTINUE_TURN_INPUT_TEXT : playerInput;
-    const historyInput =
-      opts?.systemCommand === "continue" ? CONTINUE_HISTORY_LABEL : playerInput;
+    const runnerInput = opts?.runnerInputOverride ??
+      (opts?.systemCommand === "continue" ? CONTINUE_TURN_INPUT_TEXT : playerInput);
+    const historyInput = opts?.historyInputOverride ??
+      (opts?.systemCommand === "continue" ? CONTINUE_HISTORY_LABEL : playerInput);
     // 2. 快照（lock 后第一步）——捕获"本回合开始前的完整提交态"（含上回合 done.json）。
-    await createSnapshot(storyId);
+    if (!opts?.snapshotAlreadyCreated) await createSnapshot(storyId);
 
     // 2.5 Issue 14：committed history 隔离基准——回合开始时的 turns/history.jsonl 原文。
     //     Agent 运行期间该文件必须保持逐字不变；正式 append 前会与基准比对。
     const historyBaseline = await readTurnHistoryRaw(storyId);
+    const rollBaseline = await readRandomRollLines(storyId);
 
     // 3. clearTurnDone 是本回合第一个 mutation，必须在 snapshot 之后。
     await clearTurnDone(storyId);
@@ -146,7 +204,14 @@ export class TurnOrchestrator {
     const workspaceDir = resolveWorkspaceDir(storyId);
     const timeoutMs = resolveTurnTimeoutMs();
     const signal = AbortSignal.timeout(timeoutMs);
-    const req = { storyId, workspaceDir, playerInput: runnerInput, task, signal };
+    const req = {
+      storyId,
+      workspaceDir,
+      playerInput: runnerInput,
+      task,
+      signal,
+      replayRolls: opts?.replayRolls,
+    };
     const startedAt = Date.now();
 
     // 6. 调用 runner（捕获异常，统一转失败）
@@ -227,7 +292,7 @@ export class TurnOrchestrator {
     }
 
     // 9. 成功：append history → 删除快照 → 返回 committed entry
-    const turnId = crypto.randomUUID();
+    const turnId = opts?.turnIdOverride ?? crypto.randomUUID();
     const at = new Date().toISOString();
     const entry: TurnHistoryEntry = {
       turnId,
@@ -245,6 +310,24 @@ export class TurnOrchestrator {
         `history append failed: ${appendErr instanceof Error ? appendErr.message : String(appendErr)}`,
         playerInput,
       );
+    }
+
+    if (task !== "init" && !opts?.retrying) {
+      try {
+        await saveTurnRetryCheckpoint(storyId, {
+          turnId,
+          playerInput,
+          runnerInput,
+          historyInput,
+          replayRolls: parseReplayRolls(rollLines.slice(rollBaseline.length)),
+        });
+      } catch (checkpointError) {
+        return await this.failTurn(
+          storyId,
+          `retry checkpoint save failed: ${checkpointError instanceof Error ? checkpointError.message : String(checkpointError)}`,
+          playerInput,
+        );
+      }
     }
 
     // 10. Issue 7：初始化任务成功提交时标记 story.md（Web 侧权威）。
