@@ -1,0 +1,33 @@
+{
+  "experiment": "latest-turn-rewrite",
+  "model": "deepseek-v4.1-flash",
+  "thinking": "xhigh (product max)",
+  "repeats": 3,
+  "maxAttemptsPerGeneration": 2,
+  "sourceScenario": "fact-ledger-ab-heldout.json",
+  "cases": [
+    {
+      "sourceCase": "heldout-causal-continuity",
+      "dimension": "fact-and-causality",
+      "correction": "请重写同一回合，并重点检查时间与因果：只能写已知的雨停前异响、雨停后挂牌，原因仍未知，任何人都不能进入检修桥。不要新增调查结论。",
+      "checks": ["时间顺序正确", "原因保持未知", "无人进入检修桥", "没有新增无依据事实"]
+    },
+    {
+      "sourceCase": "heldout-private-info",
+      "dimension": "knowledge-boundary",
+      "correction": "请重写同一回合，并严格保持知情边界：邱砚不知道铜钥匙、木柜底格或温室侧门用途，主角本回合也没有透露这些信息。",
+      "checks": ["邱砚不知道钥匙信息", "主角没有泄密", "对话仍回应陌生人问题", "没有新增无依据事实"]
+    },
+    {
+      "sourceCase": "heldout-open-decision",
+      "dimension": "player-agency",
+      "correction": "请重写同一回合，并严格保留玩家决定权：主角没有签字、没有选择任何任命；只能解释已有规则，不得新增截止日期、默认后果或替主角作决定。",
+      "checks": ["主角没有签字或选择", "年度安排仍未决", "没有虚构截止或默认后果", "交互仍把决定交给玩家"]
+    }
+  ],
+  "promotionGate": {
+    "technicalPasses": 9,
+    "correctedSemanticPasses": 8,
+    "maximumNewHardErrors": 0
+  }
+}
