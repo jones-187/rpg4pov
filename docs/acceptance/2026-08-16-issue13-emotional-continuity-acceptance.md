@@ -9,7 +9,7 @@
 | commit / branch | `0f4fd5f` / `feat/emotional-continuity`（基于 dev/perf `7b2ccae`） |
 | 运行方式 | 宿主机 `pnpm dev --port 3210`（WSL2 Ubuntu 24.04，Node 24.18）；Docker 因 socket 权限不可用 |
 | 真实 runner | `AGENT_RUNNER=claude`，claude CLI **2.1.140**（nvm 全局） |
-| 模型/网关 | NewAPI 网关 `192.168.31.72:3030`，`qwen-fp8`（Anthropic 兼容协议）；CLI 默认参数，无 seed（非 deterministic），全程同模型 |
+| 模型/网关 | NewAPI 网关（内网自建，地址不公开），`qwen-fp8`（Anthropic 兼容协议）；CLI 默认参数，无 seed（非 deterministic），全程同模型 |
 | settings | `--permission-mode auto --settings /app/claude/settings.json`；宿主机用 PATH 包装脚本把 `--settings` 重写至本地（内容同 `claude-settings.ts` 单一来源）。已知偏差：`/app/cli/roll-choice.js` 宿主机不存在（随机工具不可用；社交场景未触发随机判定） |
 | TURN_TIMEOUT_MS | 420000 |
 | POV | 未显式指定 → 默认第一人称主角限知 |

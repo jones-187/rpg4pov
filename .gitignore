@@ -30,3 +30,6 @@ turn/
 
 # browser UI smoke evidence (Issue 8)
 gui-test-screenshots/
+
+# 本机私有标记表（护栏用；含真实内网地址，绝不入库）
+.private-markers.txt
